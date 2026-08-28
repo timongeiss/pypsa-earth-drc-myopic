@@ -20,6 +20,9 @@ from _helpers import (
     copy_default_files,
     BASE_DIR,
     branch,  # Remove if Snakemake >= 8.3.0
+    resolve_by_planning_horizon,
+    resolve_config_by_planning_horizon,
+    resolve_h2export_for_planning_horizon,
 )
 from build_demand_profiles import get_load_paths_gegis
 from retrieve_databundle_light import (
@@ -63,11 +66,220 @@ RESDIR = config["results_dir"].strip("/") + f"/{SECDIR}"
 
 load_data_paths = get_load_paths_gegis("data", config)
 
+HORIZON_SPECIFIC_ELEC = config.get("foresight") == "myopic" and any(
+    isinstance(config.get(section), dict)
+    and "by_planning_horizon" in config.get(section, {})
+    for section in [
+        "base_network",
+        "clean_osm_data_options",
+        "cluster_options",
+        "custom_data",
+        "costs",
+        "electricity",
+        "lines",
+        "load_options",
+        "policy_config",
+        "sector",
+    ]
+)
+
+ELEC_NDIR = "networks/" + RDIR + ("horizon_{planning_horizons}/" if HORIZON_SPECIFIC_ELEC else "")
+ELEC_RDIR = "resources/" + RDIR + ("horizon_{planning_horizons}/" if HORIZON_SPECIFIC_ELEC else "")
+ELEC_LDIR = "logs/" + RDIR + ("horizon_{planning_horizons}/" if HORIZON_SPECIFIC_ELEC else "")
+ELEC_BDIR = "benchmarks/" + RDIR + ("horizon_{planning_horizons}/" if HORIZON_SPECIFIC_ELEC else "")
+
+
+def horizon(w):
+    return getattr(w, "planning_horizons", config["scenario"]["planning_horizons"][0])
+
+
+def hpath(path, w):
+    return path.replace("{planning_horizons}", str(horizon(w)))
+
+
+def hcfg(section, w):
+    return resolve_by_planning_horizon(config[section], horizon(w))
+
+
+def hfull_config(w):
+    return resolve_config_by_planning_horizon(config, horizon(w))
+
+
+def hload_data_paths(w):
+    return get_load_paths_gegis("data", hfull_config(w))
+
+
+def hcustom_renewable_profiles(w):
+    return hcfg("custom_data", w).get("renewable_profiles", {}) or {}
+
+
+def hrenewable_profile_input(tech):
+    return lambda w, tech=tech: hcustom_renewable_profiles(w).get(
+        tech,
+        hpath(ELEC_RDIR + f"renewable_profiles/profile_{tech}.nc", w),
+    )
+
+
+def h2exports_for_planning_horizon(planning_horizon):
+    labels_by_horizon = (
+        config.get("export", {}).get("h2export_by_planning_horizon_labels") or {}
+    )
+    for key in (planning_horizon, str(planning_horizon)):
+        if key in labels_by_horizon:
+            labels = labels_by_horizon[key]
+            return labels if isinstance(labels, list) else [labels]
+
+    labels = config.get("export", {}).get("h2export", [])
+    if not isinstance(labels, list):
+        labels = [labels]
+
+    selected = []
+    seen_quantities = set()
+    for label in labels:
+        quantity = resolve_h2export_for_planning_horizon(
+            config, label, planning_horizon
+        )
+        quantity_key = round(float(quantity), 9)
+        if quantity_key in seen_quantities:
+            continue
+        seen_quantities.add(quantity_key)
+        selected.append(label)
+
+    return selected
+
+
+def previous_h2export_for_planning_horizon(w, previous_planning_horizon):
+    previous_labels = h2exports_for_planning_horizon(previous_planning_horizon)
+    current_label = str(w.h2export)
+
+    for label in previous_labels:
+        if str(label) == current_label:
+            return label
+
+    return previous_labels[0]
+
+
+def h2export_quantity_label(quantity):
+    return f"{float(quantity):g}"
+
+
+def h2export_ship_profile(w):
+    quantity = resolve_h2export_for_planning_horizon(
+        config, w.h2export, w.planning_horizons
+    )
+    return (
+        "resources/"
+        + SECDIR
+        + "ship_profile_"
+        + h2export_quantity_label(quantity)
+        + "TWh.csv"
+    )
+
+
+def _branch_label_config(mapping, label):
+    label_keys = [label, str(label)]
+    try:
+        label_keys.append(float(label))
+    except (TypeError, ValueError):
+        pass
+
+    for key in label_keys:
+        if key in mapping:
+            return mapping[key] or {}
+
+    return {}
+
+
+def branch_component_addition_config(w):
+    additions = config.get("export", {}).get("branch_component_additions", {}) or {}
+    addition = _branch_label_config(additions, w.h2export)
+    if not addition:
+        return {}
+
+    horizons = addition.get("planning_horizons", addition.get("planning_horizon", []))
+    if not isinstance(horizons, list):
+        horizons = [horizons]
+    if str(w.planning_horizons) not in {str(horizon) for horizon in horizons}:
+        return {}
+
+    return addition
+
+
+def branch_component_template_network(w):
+    addition = branch_component_addition_config(w)
+    if not addition:
+        return []
+
+    template = addition.get("template_network")
+    if not template:
+        return []
+
+    source_horizon = addition.get("source_planning_horizon", w.planning_horizons)
+    return template.format(
+        simpl=w.simpl,
+        clusters=w.clusters,
+        ll=w.ll,
+        opts=w.opts,
+        sopts=w.sopts,
+        planning_horizons=w.planning_horizons,
+        source_planning_horizon=source_horizon,
+        discountrate=w.discountrate,
+        demand=w.demand,
+        h2export=w.h2export,
+        run_name=run.get("name", ""),
+        sector_name=run.get("sector_name", ""),
+    )
+
+
+def myopic_postnetwork_targets():
+    scenario = dict(config["scenario"])
+    planning_horizons = scenario.pop("planning_horizons")
+    pattern = (
+        RESDIR
+        + "postnetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_"
+        + "{planning_horizons}_{discountrate}_{demand}_{h2export}export.nc"
+    )
+
+    targets = []
+    for planning_horizon in planning_horizons:
+        targets.extend(
+            expand(
+                pattern,
+                **scenario,
+                **config["costs"],
+                planning_horizons=[planning_horizon],
+                h2export=h2exports_for_planning_horizon(planning_horizon),
+            )
+        )
+
+    return targets
+
+
+def hcustom_base_network(w):
+    custom_data = hcfg("custom_data", w)
+    custom_base = custom_data.get("base_network", {}) or {}
+    return custom_base if custom_base and custom_base.get("enabled", True) else {}
+
+
+def hbase_network_config(w):
+    custom_base = hcustom_base_network(w)
+    base_config = dict(hcfg("base_network", w))
+    base_config["preserve_bus_ids"] = bool(custom_base)
+    return base_config
+
 if config["enable"].get("retrieve_cost_data", True):
     COSTS = "resources/" + RDIR + f"costs_{config['costs']['year']}.csv"
 else:
     COSTS = "data/costs.csv"
+ELEC_COSTS = "resources/" + RDIR + "costs_{planning_horizons}.csv" if HORIZON_SPECIFIC_ELEC else COSTS
 ATLITE_NPROCESSES = config["atlite"].get("nprocesses", 4)
+CUSTOM_BASE_NETWORK_CONFIG = config.get("custom_data", {}).get("base_network", {}) or {}
+USE_CUSTOM_BASE_NETWORK = bool(CUSTOM_BASE_NETWORK_CONFIG) and CUSTOM_BASE_NETWORK_CONFIG.get(
+    "enabled", True
+)
+CUSTOM_BASE_NETWORK = CUSTOM_BASE_NETWORK_CONFIG if USE_CUSTOM_BASE_NETWORK else {}
+BASE_NETWORK_CONFIG = dict(config["base_network"])
+BASE_NETWORK_CONFIG["preserve_bus_ids"] = USE_CUSTOM_BASE_NETWORK
 
 
 wildcard_constraints:
@@ -79,7 +291,7 @@ wildcard_constraints:
     sopts="[-+a-zA-Z0-9\.\s]*",
     discountrate="[-+a-zA-Z0-9\.\s]*",
     demand="[-+a-zA-Z0-9\.\s]*",
-    h2export="[0-9]+(\.[0-9]+)?",
+    h2export="[A-Za-z0-9_.-]+",
     planning_horizons="20[2-9][0-9]|2100",
 
 
@@ -278,27 +490,41 @@ rule base_network:
         transformers=config["transformers"],
         snapshots=config["snapshots"],
         links=config["links"],
-        lines=config["lines"],
+        lines=lambda w: hcfg("lines", w),
         hvdc_as_lines=config["electricity"]["hvdc_as_lines"],
         countries=config["countries"],
-        base_network=config["base_network"],
+        base_network=hbase_network_config,
     input:
-        osm_buses="resources/" + RDIR + "base_network/all_buses_build_network.csv",
-        osm_lines="resources/" + RDIR + "base_network/all_lines_build_network.csv",
-        osm_converters="resources/"
-        + RDIR
-        + "base_network/all_converters_build_network.csv",
-        osm_transformers="resources/"
-        + RDIR
-        + "base_network/all_transformers_build_network.csv",
+        osm_buses=lambda w: hcustom_base_network(w).get(
+            "buses",
+            hpath("resources/" + RDIR + "base_network/all_buses_build_network.csv", w),
+        ),
+        osm_lines=lambda w: hcustom_base_network(w).get(
+            "lines",
+            hpath("resources/" + RDIR + "base_network/all_lines_build_network.csv", w),
+        ),
+        osm_converters=lambda w: hcustom_base_network(w).get(
+            "converters",
+            hpath(
+                "resources/" + RDIR + "base_network/all_converters_build_network.csv",
+                w,
+            ),
+        ),
+        osm_transformers=lambda w: hcustom_base_network(w).get(
+            "transformers",
+            hpath(
+                "resources/" + RDIR + "base_network/all_transformers_build_network.csv",
+                w,
+            ),
+        ),
         country_shapes="resources/" + RDIR + "shapes/country_shapes.geojson",
         offshore_shapes="resources/" + RDIR + "shapes/offshore_shapes.geojson",
     output:
-        "networks/" + RDIR + "base.nc",
+        ELEC_NDIR + "base.nc",
     log:
-        "logs/" + RDIR + "base_network.log",
+        ELEC_LDIR + "base_network.log",
     benchmark:
-        "benchmarks/" + RDIR + "base_network"
+        ELEC_BDIR + "base_network"
     threads: 1
     resources:
         mem_mb=500,
@@ -308,25 +534,25 @@ rule base_network:
 
 rule build_bus_regions:
     params:
-        alternative_clustering=config["cluster_options"]["alternative_clustering"],
+        alternative_clustering=lambda w: hcfg("cluster_options", w)["alternative_clustering"],
         crs=config["crs"],
         countries=config["countries"],
     input:
         country_shapes="resources/" + RDIR + "shapes/country_shapes.geojson",
         offshore_shapes="resources/" + RDIR + "shapes/offshore_shapes.geojson",
-        base_network="networks/" + RDIR + "base.nc",
+        base_network=ELEC_NDIR + "base.nc",
         #gadm_shapes="resources/" + RDIR + "shapes/MAR2.geojson",
         #using this line instead of the following will test updated gadm shapes for MA.
         #To use: downlaod file from the google drive and place it in resources/" + RDIR + "shapes/
         #Link: https://drive.google.com/drive/u/1/folders/1dkW1wKBWvSY4i-XEuQFFBj242p0VdUlM
         gadm_shapes="resources/" + RDIR + "shapes/gadm_shapes.geojson",
     output:
-        regions_onshore="resources/" + RDIR + "bus_regions/regions_onshore.geojson",
-        regions_offshore="resources/" + RDIR + "bus_regions/regions_offshore.geojson",
+        regions_onshore=ELEC_RDIR + "bus_regions/regions_onshore.geojson",
+        regions_offshore=ELEC_RDIR + "bus_regions/regions_offshore.geojson",
     log:
-        "logs/" + RDIR + "build_bus_regions.log",
+        ELEC_LDIR + "build_bus_regions.log",
     benchmark:
-        "benchmarks/" + RDIR + "build_bus_regions"
+        ELEC_BDIR + "build_bus_regions"
     threads: 1
     resources:
         mem_mb=1000,
@@ -452,23 +678,23 @@ if config["enable"].get("retrieve_cost_data", True):
 rule build_demand_profiles:
     params:
         snapshots=config["snapshots"],
-        load_options=config["load_options"],
+        load_options=lambda w: hcfg("load_options", w),
         countries=config["countries"],
     input:
-        base_network="networks/" + RDIR + "base.nc",
-        regions="resources/" + RDIR + "bus_regions/regions_onshore.geojson",
-        load=load_data_paths,
+        base_network=ELEC_NDIR + "base.nc",
+        regions=ELEC_RDIR + "bus_regions/regions_onshore.geojson",
+        load=hload_data_paths,
         #gadm_shapes="resources/" + RDIR + "shapes/MAR2.geojson",
         #using this line instead of the following will test updated gadm shapes for MA.
         #To use: downlaod file from the google drive and place it in resources/" + RDIR + "shapes/
         #Link: https://drive.google.com/drive/u/1/folders/1dkW1wKBWvSY4i-XEuQFFBj242p0VdUlM
         gadm_shapes="resources/" + RDIR + "shapes/gadm_shapes.geojson",
     output:
-        "resources/" + RDIR + "demand_profiles.csv",
+        ELEC_RDIR + "demand_profiles.csv",
     log:
-        "logs/" + RDIR + "build_demand_profiles.log",
+        ELEC_LDIR + "build_demand_profiles.log",
     benchmark:
-        "benchmarks/" + RDIR + "build_demand_profiles"
+        ELEC_BDIR + "build_demand_profiles"
     threads: 1
     resources:
         mem_mb=3000,
@@ -490,22 +716,22 @@ rule build_renewable_profiles:
         offshore_shapes="resources/" + RDIR + "shapes/offshore_shapes.geojson",
         hydro_capacities="data/hydro_capacities.csv",
         eia_hydro_generation="data/eia_hydro_annual_generation.csv",
-        powerplants="resources/" + RDIR + "powerplants.csv",
+        powerplants=ELEC_RDIR + "powerplants.csv",
         regions=lambda w: (
-            "resources/" + RDIR + "bus_regions/regions_onshore.geojson"
+            hpath(ELEC_RDIR + "bus_regions/regions_onshore.geojson", w)
             if w.technology in ("onwind", "solar", "hydro", "csp")
-            else "resources/" + RDIR + "bus_regions/regions_offshore.geojson"
+            else hpath(ELEC_RDIR + "bus_regions/regions_offshore.geojson", w)
         ),
         cutout=lambda w: "cutouts/"
         + CDIR
         + config["renewable"][w.technology]["cutout"]
         + ".nc",
     output:
-        profile="resources/" + RDIR + "renewable_profiles/profile_{technology}.nc",
+        profile=ELEC_RDIR + "renewable_profiles/profile_{technology}.nc",
     log:
-        "logs/" + RDIR + "build_renewable_profile_{technology}.log",
+        ELEC_LDIR + "build_renewable_profile_{technology}.log",
     benchmark:
-        "benchmarks/" + RDIR + "build_renewable_profiles_{technology}"
+        ELEC_BDIR + "build_renewable_profiles_{technology}"
     threads: ATLITE_NPROCESSES
     resources:
         mem_mb=ATLITE_NPROCESSES * 5000,
@@ -519,24 +745,30 @@ rule build_powerplants:
         countries=config["countries"],
         gadm_layer_id=config["build_shape_options"]["gadm_layer_id"],
         alternative_clustering=config["cluster_options"]["alternative_clustering"],
-        powerplants_filter=config["electricity"]["powerplants_filter"],
+        powerplants_filter=lambda w: hcfg("electricity", w)["powerplants_filter"],
     input:
-        base_network="networks/" + RDIR + "base.nc",
+        base_network=ELEC_NDIR + "base.nc",
         pm_config="configs/powerplantmatching_config.yaml",
-        custom_powerplants="data/custom_powerplants.csv",
-        osm_powerplants="resources/" + RDIR + "osm/clean/all_clean_generators.csv",
+        custom_powerplants=config["electricity"].get(
+            "custom_powerplants_file", "data/custom_powerplants.csv"
+        ),
+        osm_powerplants=lambda w: (
+            []
+            if hcfg("electricity", w).get("custom_powerplants") == "replace"
+            else "resources/" + RDIR + "osm/clean/all_clean_generators.csv"
+        ),
         #gadm_shapes="resources/" + RDIR + "shapes/MAR2.geojson",
         #using this line instead of the following will test updated gadm shapes for MA.
         #To use: downlaod file from the google drive and place it in resources/" + RDIR + "shapes/
         #Link: https://drive.google.com/drive/u/1/folders/1dkW1wKBWvSY4i-XEuQFFBj242p0VdUlM
         gadm_shapes="resources/" + RDIR + "shapes/gadm_shapes.geojson",
     output:
-        powerplants="resources/" + RDIR + "powerplants.csv",
-        powerplants_osm2pm="resources/" + RDIR + "powerplants_osm2pm.csv",
+        powerplants=ELEC_RDIR + "powerplants.csv",
+        powerplants_osm2pm=ELEC_RDIR + "powerplants_osm2pm.csv",
     log:
-        "logs/" + RDIR + "build_powerplants.log",
+        ELEC_LDIR + "build_powerplants.log",
     benchmark:
-        "benchmarks/" + RDIR + "build_powerplants"
+        ELEC_BDIR + "build_powerplants"
     threads: 1
     resources:
         mem_mb=500,
@@ -547,17 +779,15 @@ rule build_powerplants:
 rule add_electricity:
     params:
         countries=config["countries"],
-        costs=config["costs"],
+        costs=lambda w: hcfg("costs", w),
         conventional=config.get("conventional", {}),
-        electricity=config["electricity"],
+        electricity=lambda w: hcfg("electricity", w),
         alternative_clustering=config["cluster_options"]["alternative_clustering"],
         renewable=config["renewable"],
         length_factor=config["lines"]["length_factor"],
     input:
         **{
-            f"profile_{tech}": "resources/"
-            + RDIR
-            + f"renewable_profiles/profile_{tech}.nc"
+            f"profile_{tech}": hrenewable_profile_input(tech)
             for tech in config["renewable"]
             if tech in config["electricity"]["renewable_carriers"]
         },
@@ -567,22 +797,22 @@ rule add_electricity:
             for attr, fn in d.items()
             if str(fn).startswith("data/")
         },
-        base_network="networks/" + RDIR + "base.nc",
-        tech_costs=COSTS,
-        powerplants="resources/" + RDIR + "powerplants.csv",
+        base_network=ELEC_NDIR + "base.nc",
+        tech_costs=ELEC_COSTS,
+        powerplants=ELEC_RDIR + "powerplants.csv",
         #gadm_shapes="resources/" + RDIR + "shapes/MAR2.geojson",
         #using this line instead of the following will test updated gadm shapes for MA.
         #To use: downlaod file from the google drive and place it in resources/" + RDIR + "shapes/
         #Link: https://drive.google.com/drive/u/1/folders/1dkW1wKBWvSY4i-XEuQFFBj242p0VdUlM
         gadm_shapes="resources/" + RDIR + "shapes/gadm_shapes.geojson",
         hydro_capacities="data/hydro_capacities.csv",
-        demand_profiles="resources/" + RDIR + "demand_profiles.csv",
+        demand_profiles=ELEC_RDIR + "demand_profiles.csv",
     output:
-        "networks/" + RDIR + "elec.nc",
+        ELEC_NDIR + "elec.nc",
     log:
-        "logs/" + RDIR + "add_electricity.log",
+        ELEC_LDIR + "add_electricity.log",
     benchmark:
-        "benchmarks/" + RDIR + "add_electricity"
+        ELEC_BDIR + "add_electricity"
     threads: 1
     resources:
         mem_mb=3000,
@@ -592,41 +822,37 @@ rule add_electricity:
 
 rule simplify_network:
     params:
-        aggregation_strategies=config["cluster_options"]["aggregation_strategies"],
+        aggregation_strategies=lambda w: hcfg("cluster_options", w)["aggregation_strategies"],
         renewable=config["renewable"],
         crs=config["crs"],
-        cluster_options=config["cluster_options"],
+        cluster_options=lambda w: hcfg("cluster_options", w),
         countries=config["countries"],
         build_shape_options=config["build_shape_options"],
-        electricity=config["electricity"],
-        costs=config["costs"],
-        config_lines=config["lines"],
+        electricity=lambda w: hcfg("electricity", w),
+        costs=lambda w: hcfg("costs", w),
+        config_lines=lambda w: hcfg("lines", w),
         config_links=config["links"],
         focus_weights=config.get("focus_weights", None),
         subregion=config["subregion"],
     input:
-        network="networks/" + RDIR + "elec.nc",
-        tech_costs=COSTS,
-        regions_onshore="resources/" + RDIR + "bus_regions/regions_onshore.geojson",
-        regions_offshore="resources/" + RDIR + "bus_regions/regions_offshore.geojson",
+        network=ELEC_NDIR + "elec.nc",
+        tech_costs=ELEC_COSTS,
+        regions_onshore=ELEC_RDIR + "bus_regions/regions_onshore.geojson",
+        regions_offshore=ELEC_RDIR + "bus_regions/regions_offshore.geojson",
         country_shapes="resources/" + RDIR + "shapes/country_shapes.geojson",
         subregion_shapes="resources/" + RDIR + "shapes/subregion_shapes.geojson",
     output:
-        network="networks/" + RDIR + "elec_s{simpl}.nc",
-        regions_onshore="resources/"
-        + RDIR
+        network=ELEC_NDIR + "elec_s{simpl}.nc",
+        regions_onshore=ELEC_RDIR
         + "bus_regions/regions_onshore_elec_s{simpl}.geojson",
-        regions_offshore="resources/"
-        + RDIR
+        regions_offshore=ELEC_RDIR
         + "bus_regions/regions_offshore_elec_s{simpl}.geojson",
-        busmap="resources/" + RDIR + "bus_regions/busmap_elec_s{simpl}.csv",
-        connection_costs="resources/"
-        + RDIR
-        + "bus_regions/connection_costs_s{simpl}.csv",
+        busmap=ELEC_RDIR + "bus_regions/busmap_elec_s{simpl}.csv",
+        connection_costs=ELEC_RDIR + "bus_regions/connection_costs_s{simpl}.csv",
     log:
-        "logs/" + RDIR + "simplify_network/elec_s{simpl}.log",
+        ELEC_LDIR + "simplify_network/elec_s{simpl}.log",
     benchmark:
-        "benchmarks/" + RDIR + "simplify_network/elec_s{simpl}"
+        ELEC_BDIR + "simplify_network/elec_s{simpl}"
     threads: 1
     resources:
         mem_mb=4000,
@@ -636,26 +862,24 @@ rule simplify_network:
 
 rule cluster_network:
     params:
-        aggregation_strategies=config["cluster_options"]["aggregation_strategies"],
+        aggregation_strategies=lambda w: hcfg("cluster_options", w)["aggregation_strategies"],
         build_shape_options=config["build_shape_options"],
-        electricity=config["electricity"],
-        costs=config["costs"],
+        electricity=lambda w: hcfg("electricity", w),
+        costs=lambda w: hcfg("costs", w),
         length_factor=config["lines"]["length_factor"],
         renewable=config["renewable"],
         crs=config["crs"],
         countries=config["countries"],
-        cluster_options=config["cluster_options"],
+        cluster_options=lambda w: hcfg("cluster_options", w),
         focus_weights=config.get("focus_weights", None),
         custom_busmap=config["enable"].get("custom_busmap", False),
         subregion=config["subregion"],
     input:
-        network="networks/" + RDIR + "elec_s{simpl}.nc",
+        network=ELEC_NDIR + "elec_s{simpl}.nc",
         country_shapes="resources/" + RDIR + "shapes/country_shapes.geojson",
-        regions_onshore="resources/"
-        + RDIR
+        regions_onshore=ELEC_RDIR
         + "bus_regions/regions_onshore_elec_s{simpl}.geojson",
-        regions_offshore="resources/"
-        + RDIR
+        regions_offshore=ELEC_RDIR
         + "bus_regions/regions_offshore_elec_s{simpl}.geojson",
         #gadm_shapes="resources/" + RDIR + "shapes/MAR2.geojson",
         #using this line instead of the following will test updated gadm shapes for MA.
@@ -668,60 +892,58 @@ rule cluster_network:
             if config["enable"].get("custom_busmap", False)
             else []
         ),
-        tech_costs=COSTS,
+        tech_costs=ELEC_COSTS,
         subregion_shapes="resources/" + RDIR + "shapes/subregion_shapes.geojson",
     output:
         network=branch(
             config["augmented_line_connection"].get("add_to_snakefile", False) == True,
-            "networks/" + RDIR + "elec_s{simpl}_{clusters}_pre_augmentation.nc",
-            "networks/" + RDIR + "elec_s{simpl}_{clusters}.nc",
+            ELEC_NDIR + "elec_s{simpl}_{clusters}_pre_augmentation.nc",
+            ELEC_NDIR + "elec_s{simpl}_{clusters}.nc",
         ),
-        regions_onshore="resources/"
-        + RDIR
+        regions_onshore=ELEC_RDIR
         + "bus_regions/regions_onshore_elec_s{simpl}_{clusters}.geojson",
-        regions_offshore="resources/"
-        + RDIR
+        regions_offshore=ELEC_RDIR
         + "bus_regions/regions_offshore_elec_s{simpl}_{clusters}.geojson",
-        busmap="resources/" + RDIR + "bus_regions/busmap_elec_s{simpl}_{clusters}.csv",
-        linemap="resources/" + RDIR + "bus_regions/linemap_elec_s{simpl}_{clusters}.csv",
+        busmap=ELEC_RDIR + "bus_regions/busmap_elec_s{simpl}_{clusters}.csv",
+        linemap=ELEC_RDIR + "bus_regions/linemap_elec_s{simpl}_{clusters}.csv",
     log:
-        "logs/" + RDIR + "cluster_network/elec_s{simpl}_{clusters}.log",
+        ELEC_LDIR + "cluster_network/elec_s{simpl}_{clusters}.log",
     benchmark:
-        "benchmarks/" + RDIR + "cluster_network/elec_s{simpl}_{clusters}"
+        ELEC_BDIR + "cluster_network/elec_s{simpl}_{clusters}"
     threads: 1
     resources:
         mem_mb=3000,
     script:
         "scripts/cluster_network.py"
 
-
-rule augmented_line_connections:
-    params:
-        lines=config["lines"],
-        augmented_line_connection=config["augmented_line_connection"],
-        hvdc_as_lines=config["electricity"]["hvdc_as_lines"],
-        electricity=config["electricity"],
-        costs=config["costs"],
-    input:
-        tech_costs=COSTS,
-        network="networks/" + RDIR + "elec_s{simpl}_{clusters}_pre_augmentation.nc",
-        regions_onshore="resources/"
-        + RDIR
-        + "bus_regions/regions_onshore_elec_s{simpl}_{clusters}.geojson",
-        regions_offshore="resources/"
-        + RDIR
-        + "bus_regions/regions_offshore_elec_s{simpl}_{clusters}.geojson",
-    output:
-        network="networks/" + RDIR + "elec_s{simpl}_{clusters}.nc",
-    log:
-        "logs/" + RDIR + "augmented_line_connections/elec_s{simpl}_{clusters}.log",
-    benchmark:
-        "benchmarks/" + RDIR + "augmented_line_connections/elec_s{simpl}_{clusters}"
-    threads: 1
-    resources:
-        mem_mb=3000,
-    script:
-        "scripts/augmented_line_connections.py"
+if(config["augmented_line_connection"].get("add_to_snakefile") == True):
+    rule augmented_line_connections:
+        params:
+            lines=config["lines"],
+            augmented_line_connection=config["augmented_line_connection"],
+            hvdc_as_lines=config["electricity"]["hvdc_as_lines"],
+            electricity=config["electricity"],
+            costs=config["costs"],
+        input:
+            tech_costs=COSTS,
+            network="networks/" + RDIR + "elec_s{simpl}_{clusters}_pre_augmentation.nc",
+            regions_onshore="resources/"
+            + RDIR
+            + "bus_regions/regions_onshore_elec_s{simpl}_{clusters}.geojson",
+            regions_offshore="resources/"
+            + RDIR
+            + "bus_regions/regions_offshore_elec_s{simpl}_{clusters}.geojson",
+        output:
+            network="networks/" + RDIR + "elec_s{simpl}_{clusters}.nc",
+        log:
+            "logs/" + RDIR + "augmented_line_connections/elec_s{simpl}_{clusters}.log",
+        benchmark:
+            "benchmarks/" + RDIR + "augmented_line_connections/elec_s{simpl}_{clusters}"
+        threads: 1
+        resources:
+            mem_mb=3000,
+        script:
+            "scripts/augmented_line_connections.py"
 
 
 rule add_extra_components:
@@ -729,14 +951,14 @@ rule add_extra_components:
         transmission_efficiency=config["sector"]["transmission_efficiency"],
     input:
         overrides="data/override_component_attrs",
-        network="networks/" + RDIR + "elec_s{simpl}_{clusters}.nc",
-        tech_costs=COSTS,
+        network=ELEC_NDIR + "elec_s{simpl}_{clusters}.nc",
+        tech_costs=ELEC_COSTS,
     output:
-        "networks/" + RDIR + "elec_s{simpl}_{clusters}_ec.nc",
+        ELEC_NDIR + "elec_s{simpl}_{clusters}_ec.nc",
     log:
-        "logs/" + RDIR + "add_extra_components/elec_s{simpl}_{clusters}.log",
+        ELEC_LDIR + "add_extra_components/elec_s{simpl}_{clusters}.log",
     benchmark:
-        "benchmarks/" + RDIR + "add_extra_components/elec_s{simpl}_{clusters}_ec"
+        ELEC_BDIR + "add_extra_components/elec_s{simpl}_{clusters}_ec"
     threads: 1
     resources:
         mem_mb=3000,
@@ -747,23 +969,19 @@ rule add_extra_components:
 rule prepare_network:
     params:
         links=config["links"],
-        lines=config["lines"],
-        s_max_pu=config["lines"]["s_max_pu"],
-        electricity=config["electricity"],
-        costs=config["costs"],
+        lines=lambda w: hcfg("lines", w),
+        s_max_pu=lambda w: hcfg("lines", w)["s_max_pu"],
+        electricity=lambda w: hcfg("electricity", w),
+        costs=lambda w: hcfg("costs", w),
     input:
-        "networks/" + RDIR + "elec_s{simpl}_{clusters}_ec.nc",
-        tech_costs=COSTS,
+        ELEC_NDIR + "elec_s{simpl}_{clusters}_ec.nc",
+        tech_costs=ELEC_COSTS,
     output:
-        "networks/" + RDIR + "elec_s{simpl}_{clusters}_ec_l{ll}_{opts}.nc",
+        ELEC_NDIR + "elec_s{simpl}_{clusters}_ec_l{ll}_{opts}.nc",
     log:
-        "logs/" + RDIR + "prepare_network/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}.log",
+        ELEC_LDIR + "prepare_network/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}.log",
     benchmark:
-        (
-            "benchmarks/"
-            + RDIR
-            + "prepare_network/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}"
-        )
+        ELEC_BDIR + "prepare_network/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}"
     threads: 1
     resources:
         mem_mb=4000,
@@ -1024,6 +1242,7 @@ rule prepare_transport_data_input:
         "scripts/prepare_transport_data_input.py"
 
 
+
 if not config["custom_data"]["gas_network"]:
 
     rule prepare_gas_network:
@@ -1090,65 +1309,146 @@ HEAT = {
 }
 
 
+def hsector_enable(w):
+    return hcfg("sector", w).get("enable", {})
+
+
+def hinput_if(w, condition, path):
+    return path if condition else []
+
+
+def htransport_input(name):
+    return lambda w: hinput_if(
+        w,
+        hsector_enable(w).get("land_transport", False),
+        TRANSPORT[name],
+    )
+
+
+def hheat_input(name):
+    return lambda w: hinput_if(
+        w,
+        hsector_enable(w).get("heat", False),
+        HEAT[name],
+    )
+
+
+def hneeds_nodal_energy_totals(w):
+    enable = hsector_enable(w)
+    return enable.get("rail_transport", False) or enable.get("agriculture", False)
+
+
+def hneeds_clustered_pop_layout(w):
+    enable = hsector_enable(w)
+    return any(
+        enable.get(sector, False)
+        for sector in [
+            "heat",
+            "industry",
+            "land_transport",
+            "rail_transport",
+            "agriculture",
+            "residential",
+            "services",
+            "shipping",
+            "aviation",
+        ]
+    )
+
+
+def hneeds_energy_totals(w):
+    enable = hsector_enable(w)
+    return any(
+        enable.get(sector, False)
+        for sector in ["shipping", "aviation", "residential", "services"]
+    )
+
+
+def hpipelines_input(w):
+    sector = hcfg("sector", w)
+    if not sector.get("hydrogen", {}).get("network", False):
+        return []
+    if hcfg("custom_data", w).get("gas_network", False):
+        return "data/custom/pipelines.csv"
+    return "resources/" + SECDIR + "gas_networks/gas_network_elec_s{simpl}_{clusters}.csv"
+
+
 rule prepare_sector_network:
     params:
-        costs=config["costs"],
-        electricity=config["electricity"],
+        costs=lambda w: hcfg("costs", w),
+        electricity=lambda w: hcfg("electricity", w),
         fossil_reserves=config["fossil_reserves"],
-        h2_underground=config["custom_data"]["h2_underground"],
+        h2_underground=lambda w: hcfg("custom_data", w)["h2_underground"],
         countries=config["countries"],
         gadm_layer_id=config["build_shape_options"]["gadm_layer_id"],
         alternative_clustering=config["cluster_options"]["alternative_clustering"],
-        h2_policy=config["policy_config"]["hydrogen"],
-        sector_options=config["sector"],
+        h2_policy=lambda w: hcfg("policy_config", w)["hydrogen"],
+        sector_options=lambda w: hcfg("sector", w),
         foresight=config["foresight"],
-        water_costs=config["custom_data"]["water_costs"],
+        water_costs=lambda w: hcfg("custom_data", w)["water_costs"],
         co2_budget=config["co2_budget"],
     input:
-        **branch(sector_enable["land_transport"], TRANSPORT),
-        **branch(sector_enable["heat"], HEAT),
+        transport=htransport_input("transport"),
+        avail_profile=htransport_input("avail_profile"),
+        dsm_profile=htransport_input("dsm_profile"),
+        nodal_transport_data=htransport_input("nodal_transport_data"),
+        heat_demand=hheat_input("heat_demand"),
+        ashp_cop=hheat_input("ashp_cop"),
+        gshp_cop=hheat_input("gshp_cop"),
+        solar_thermal=hheat_input("solar_thermal"),
+        district_heat_share=hheat_input("district_heat_share"),
         network=RESDIR
         + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_presec.nc",
         costs="resources/" + RDIR + "costs_{planning_horizons}.csv",
-        h2_cavern="data/hydrogen_salt_cavern_potentials.csv",
-        nodal_energy_totals=branch(
-            sector_enable["rail_transport"] or sector_enable["agriculture"],
+        nodal_energy_totals=lambda w: hinput_if(
+            w,
+            hneeds_nodal_energy_totals(w),
             "resources/"
             + SECDIR
             + "demand/heat/nodal_energy_heat_totals_{demand}_s{simpl}_{clusters}_{planning_horizons}.csv",
         ),
         overrides="data/override_component_attrs",
-        clustered_pop_layout="resources/"
-        + SECDIR
-        + "population_shares/pop_layout_elec_s{simpl}_{clusters}_{planning_horizons}.csv",
-        industrial_demand=branch(
-            sector_enable["industry"],
+        clustered_pop_layout=lambda w: hinput_if(
+            w,
+            hneeds_clustered_pop_layout(w),
+            "resources/"
+            + SECDIR
+            + "population_shares/pop_layout_elec_s{simpl}_{clusters}_{planning_horizons}.csv",
+        ),
+        industrial_demand=lambda w: hinput_if(
+            w,
+            hsector_enable(w).get("industry", False),
             "resources/"
             + SECDIR
             + "demand/industrial_energy_demand_per_node_elec_s{simpl}_{clusters}_{planning_horizons}_{demand}.csv",
         ),
-        energy_totals="resources/"
-        + SECDIR
-        + "energy_totals_{demand}_{planning_horizons}.csv",
-        airports=branch(
-            sector_enable["aviation"],
+        energy_totals=lambda w: hinput_if(
+            w,
+            hneeds_energy_totals(w),
+            "resources/"
+            + SECDIR
+            + "energy_totals_{demand}_{planning_horizons}.csv",
+        ),
+        airports=lambda w: hinput_if(
+            w,
+            hsector_enable(w).get("aviation", False),
             "resources/" + SECDIR + "airports.csv",
         ),
-        ports=branch(sector_enable["shipping"], "resources/" + SECDIR + "ports.csv"),
+        ports=lambda w: hinput_if(
+            w,
+            hsector_enable(w).get("shipping", False),
+            "resources/" + SECDIR + "ports.csv",
+        ),
         biomass_transport_costs="data/temp_hard_coded/biomass_transport_costs.csv",
         shapes_path="resources/"
         + RDIR
+        + (
+            "horizon_{planning_horizons}/"
+            if HORIZON_SPECIFIC_ELEC
+            else ""
+        )
         + "bus_regions/regions_onshore_elec_s{simpl}_{clusters}.geojson",
-        pipelines=branch(
-            config["sector"]["hydrogen"]["network"],
-            branch(
-                config["custom_data"]["gas_network"],
-                "data/custom/pipelines.csv",
-                "resources/"
-                + SECDIR
-                + "gas_networks/gas_network_elec_s{simpl}_{clusters}.csv",
-            ),
-        ),
+        pipelines=hpipelines_input,
     output:
         RESDIR
         + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}.nc",
@@ -1184,17 +1484,18 @@ rule add_export:
         export_endogenous=config["export"]["endogenous"],
         endogenous_price=config["export"]["endogenous_price"],
         snapshots=config["snapshots"],
-        costs=config["costs"],
+        costs=lambda w: hcfg("costs", w),
+        branch_component_additions=branch_component_addition_config,
     input:
         overrides="data/override_component_attrs",
         export_ports="resources/" + SECDIR + "export_ports.csv",
         costs="resources/" + RDIR + "costs_{planning_horizons}.csv",
-        ship_profile="resources/" + SECDIR + "ship_profile_{h2export}TWh.csv",
+        ship_profile=h2export_ship_profile,
         network=RESDIR
         + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}.nc",
-        shapes_path="resources/"
-        + RDIR
+        shapes_path=ELEC_RDIR
         + "bus_regions/regions_onshore_elec_s{simpl}_{clusters}.geojson",
+        branch_template_network=branch_component_template_network,
     output:
         RESDIR
         + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export.nc",
@@ -1205,7 +1506,7 @@ rule add_export:
 rule override_respot:
     params:
         run=run["name"],
-        custom_data=config["custom_data"],
+        custom_data=lambda w: hcfg("custom_data", w),
         countries=config["countries"],
     input:
         **{
@@ -1225,10 +1526,14 @@ rule override_respot:
             for planning_horizons in config["scenario"]["planning_horizons"]
         },
         overrides="data/override_component_attrs",
-        network="networks/" + RDIR + "elec_s{simpl}_{clusters}_ec_l{ll}_{opts}.nc",
-        energy_totals="resources/"
-        + SECDIR
-        + "energy_totals_{demand}_{planning_horizons}.csv",
+        network=ELEC_NDIR + "elec_s{simpl}_{clusters}_ec_l{ll}_{opts}.nc",
+        energy_totals=lambda w: hinput_if(
+            w,
+            bool(hcfg("custom_data", w).get("elec_demand", False)),
+            "resources/"
+            + SECDIR
+            + "energy_totals_{demand}_{planning_horizons}.csv",
+        ),
     output:
         RESDIR
         + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_presec.nc",
@@ -1238,7 +1543,7 @@ rule override_respot:
 
 rule prepare_transport_data:
     input:
-        network="networks/" + RDIR + "elec_s{simpl}_{clusters}.nc",
+        network=ELEC_NDIR + "elec_s{simpl}_{clusters}.nc",
         energy_totals_name="resources/"
         + SECDIR
         + "energy_totals_{demand}_{planning_horizons}.csv",
@@ -1419,8 +1724,7 @@ rule build_solar_thermal_profiles:
         pop_layout_rural="resources/"
         + SECDIR
         + "population_shares/pop_layout_rural_{planning_horizons}.nc",
-        regions_onshore="resources/"
-        + RDIR
+        regions_onshore=ELEC_RDIR
         + "bus_regions/regions_onshore_elec_s{simpl}_{clusters}.geojson",
         cutout="cutouts/"
         + CDIR
@@ -1505,8 +1809,7 @@ rule build_clustered_population_layouts:
         gdp_layout="resources/"
         + SECDIR
         + "gdp_shares/gdp_layout_{planning_horizons}.nc",
-        regions_onshore="resources/"
-        + RDIR
+        regions_onshore=ELEC_RDIR
         + "bus_regions/regions_onshore_elec_s{simpl}_{clusters}.geojson",
         cutout="cutouts/"
         + CDIR
@@ -1545,8 +1848,7 @@ rule build_heat_demand:
         pop_layout_rural="resources/"
         + SECDIR
         + "population_shares/pop_layout_rural_{planning_horizons}.nc",
-        regions_onshore="resources/"
-        + RDIR
+        regions_onshore=ELEC_RDIR
         + "bus_regions/regions_onshore_elec_s{simpl}_{clusters}.geojson",
         cutout="cutouts/"
         + CDIR
@@ -1588,8 +1890,7 @@ rule build_temperature_profiles:
         pop_layout_rural="resources/"
         + SECDIR
         + "population_shares/pop_layout_rural_{planning_horizons}.nc",
-        regions_onshore="resources/"
-        + RDIR
+        regions_onshore=ELEC_RDIR
         + "bus_regions/regions_onshore_elec_s{simpl}_{clusters}.geojson",
         cutout="cutouts/"
         + CDIR
@@ -2013,18 +2314,16 @@ if config["foresight"] == "myopic":
     rule add_existing_baseyear:
         params:
             baseyear=config["scenario"]["planning_horizons"][0],
-            sector=config["sector"],
+            sector=lambda w: hcfg("sector", w),
             existing_capacities=config["existing_capacities"],
             costs=config["costs"],
         input:
             **branch(sector_enable["heat"], HEAT_BASEYEAR),
             network=RESDIR
             + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export.nc",
-            powerplants="resources/" + RDIR + "powerplants.csv",
-            busmap_s="resources/" + RDIR + "bus_regions/busmap_elec_s{simpl}.csv",
-            busmap="resources/"
-            + RDIR
-            + "bus_regions/busmap_elec_s{simpl}_{clusters}.csv",
+            powerplants=ELEC_RDIR + "powerplants.csv",
+            busmap_s=ELEC_RDIR + "bus_regions/busmap_elec_s{simpl}.csv",
+            busmap=ELEC_RDIR + "bus_regions/busmap_elec_s{simpl}_{clusters}.csv",
             # clustered_pop_layout="resources/"
             # + SECDIR
             # + "population_shares/pop_layout_elec_s{simpl}_{clusters}_{planning_horizons}.csv",
@@ -2051,9 +2350,9 @@ if config["foresight"] == "myopic":
 
     def input_profile_tech_brownfield(w):
         return {
-            f"profile_{tech}": f"resources/"
-            + RDIR
-            + "renewable_profiles/profile_{tech}.nc"
+            f"profile_{tech}": hpath(
+                "resources/" + RDIR + "renewable_profiles/profile_{tech}.nc", w
+            )
             for tech in config["electricity"]["renewable_carriers"]
             if tech != "hydro"
         }
@@ -2061,41 +2360,51 @@ if config["foresight"] == "myopic":
     def solved_previous_horizon(w):
         planning_horizons = config["scenario"]["planning_horizons"]
         i = planning_horizons.index(int(w.planning_horizons))
-        planning_horizon_p = str(planning_horizons[i - 1])
+        planning_horizon_p = planning_horizons[i - 1]
+        h2export_p = previous_h2export_for_planning_horizon(w, planning_horizon_p)
 
         return (
             RESDIR
             + "postnetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_"
-            + planning_horizon_p
-            + "_{discountrate}_{demand}_{h2export}export.nc"
+            + str(planning_horizon_p)
+            + "_{discountrate}_{demand}_"
+            + str(h2export_p)
+            + "export.nc"
         )
 
     rule add_brownfield:
         params:
-            H2_retrofit=config["sector"]["hydrogen"],
-            H2_retrofit_capacity_per_CH4=config["sector"]["hydrogen"][
+            H2_retrofit=lambda w: hcfg("sector", w)["hydrogen"],
+            H2_retrofit_capacity_per_CH4=lambda w: hcfg("sector", w)["hydrogen"][
                 "H2_retrofit_capacity_per_CH4"
             ],
             threshold_capacity=config["existing_capacities"]["threshold_capacity"],
             snapshots=config["snapshots"],
             # drop_leap_day=config["enable"]["drop_leap_day"],
-            carriers=config["electricity"]["renewable_carriers"],
+            carriers=lambda w: hcfg("electricity", w)["renewable_carriers"],
         input:
             # unpack(input_profile_tech_brownfield),
-            simplify_busmap="resources/" + RDIR + "bus_regions/busmap_elec_s{simpl}.csv",
-            cluster_busmap="resources/"
-            + RDIR
+            simplify_busmap=ELEC_RDIR + "bus_regions/busmap_elec_s{simpl}.csv",
+            cluster_busmap=ELEC_RDIR
             + "bus_regions/busmap_elec_s{simpl}_{clusters}.csv",
             network=RESDIR
             + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export.nc",
             network_p=solved_previous_horizon,  #solved network at previous time step
             costs="resources/" + RDIR + "costs_{planning_horizons}.csv",
-            cop_soil_total="resources/"
-            + SECDIR
-            + "cops/cop_soil_total_elec_s{simpl}_{clusters}_{planning_horizons}.nc",
-            cop_air_total="resources/"
-            + SECDIR
-            + "cops/cop_air_total_elec_s{simpl}_{clusters}_{planning_horizons}.nc",
+            cop_soil_total=lambda w: hinput_if(
+                w,
+                hsector_enable(w).get("heat", False),
+                "resources/"
+                + SECDIR
+                + "cops/cop_soil_total_elec_s{simpl}_{clusters}_{planning_horizons}.nc",
+            ),
+            cop_air_total=lambda w: hinput_if(
+                w,
+                hsector_enable(w).get("heat", False),
+                "resources/"
+                + SECDIR
+                + "cops/cop_air_total_elec_s{simpl}_{clusters}_{planning_horizons}.nc",
+            ),
         output:
             RESDIR
             + "prenetworks-brownfield/elec_s{simpl}_{clusters}_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export.nc",
@@ -2117,21 +2426,21 @@ if config["foresight"] == "myopic":
 
     rule solve_network_myopic:
         params:
-            solving=config["solving"],
+            solving=lambda w: hcfg("solving", w),
             foresight=config["foresight"],
             planning_horizons=config["scenario"]["planning_horizons"],
             co2_sequestration_potential=config["scenario"].get(
                 "co2_sequestration_potential", 200
             ),
             augmented_line_connection=config["augmented_line_connection"],
-            policy_config=config["policy_config"],
+            policy_config=lambda w: hcfg("policy_config", w),
         input:
             overrides=BASE_DIR + "/data/override_component_attrs",
             network=RESDIR
             + "prenetworks-brownfield/elec_s{simpl}_{clusters}_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export.nc",
             costs="resources/" + RDIR + "costs_{planning_horizons}.csv",
             configs=SDIR + "configs/config.yaml",  # included to trigger copy_config rule
-            agg_p_nom_minmax=config["electricity"]["agg_p_nom_limits"]["file"],  # ensure the CSV with capacity constraints is copied into the shadow directory (needed on Windows, since shadowed scripts can’t access files outside `input`)
+            agg_p_nom_minmax=lambda w: hcfg("electricity", w)["agg_p_nom_limits"]["file"],  # ensure the CSV with capacity constraints is copied into the shadow directory (needed on Windows, since shadowed scripts can’t access files outside `input`)
         output:
             network=RESDIR
             + "postnetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export.nc",
@@ -2162,13 +2471,7 @@ if config["foresight"] == "myopic":
 
     rule solve_sector_networks_myopic:
         input:
-            networks=expand(
-                RESDIR
-                + "postnetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export.nc",
-                **config["scenario"],
-                **config["costs"],
-                **config["export"],
-            ),
+            networks=myopic_postnetwork_targets(),
 
 
 rule run_scenario:
