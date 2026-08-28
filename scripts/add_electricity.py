@@ -150,7 +150,7 @@ def load_costs(tech_costs, config, elec_config, Nyears=1):
     """
     Set all asset costs and other parameters.
     """
-    costs = pd.read_csv(tech_costs, index_col=["technology", "parameter"]).sort_index()
+    costs = read_csv_nafix(tech_costs, index_col=["technology", "parameter"]).sort_index()
 
     # correct units to MW and output_currency
     costs.loc[costs.unit.str.contains("/kW"), "value"] *= 1e3
@@ -288,6 +288,291 @@ def load_powerplants(ppl_fn):
         logger.warning(f"Drop powerplants with null capacity: {list(null_ppls.name)}.")
         ppl = ppl.drop(null_ppls.index)
     return ppl
+
+
+def get_powerplant_candidate_config(electricity_config):
+    config = electricity_config.get("custom_powerplant_candidates", {}) or {}
+    if not config.get("enabled", False):
+        return {"enabled": False}
+
+    candidate_years = [int(year) for year in config.get("candidate_datein", [])]
+    if not candidate_years:
+        raise ValueError(
+            "custom_powerplant_candidates.enabled is true, but candidate_datein is empty."
+        )
+
+    return {
+        "enabled": True,
+        "model_year": int(config["model_year"]),
+        "existing_cutoff_year": int(config["existing_cutoff_year"]),
+        "candidate_datein": candidate_years,
+        "exclude_carriers": set(config.get("exclude_carriers", [])),
+    }
+
+
+def get_powerplant_candidate_mask(ppl, candidate_config, label):
+    if not candidate_config.get("enabled", False) or ppl.empty:
+        return pd.Series(False, index=ppl.index)
+
+    datein = pd.to_numeric(
+        ppl.get("datein", pd.Series(np.nan, index=ppl.index)), errors="coerce"
+    )
+    model_year = candidate_config["model_year"]
+    cutoff_year = candidate_config["existing_cutoff_year"]
+    candidate_years = candidate_config["candidate_datein"]
+    exclude_carriers = candidate_config.get("exclude_carriers", set())
+
+    if exclude_carriers:
+        carrier = ppl.get("carrier", pd.Series("", index=ppl.index)).astype(str)
+        excluded = carrier.isin(exclude_carriers)
+    else:
+        excluded = pd.Series(False, index=ppl.index)
+
+    future = datein.notna() & (datein > cutoff_year)
+    candidate_relevant = future & ~excluded
+    too_late = candidate_relevant & (datein > model_year)
+    unsupported = (
+        candidate_relevant & (datein <= model_year) & ~datein.isin(candidate_years)
+    )
+    invalid = too_late | unsupported
+
+    if invalid.any():
+        cols = [col for col in ["name", "carrier", "technology", "datein"] if col in ppl]
+        bad = ppl.loc[invalid, cols].head(10).to_dict("records")
+        raise ValueError(
+            f"Unexpected future {label} powerplants for model year {model_year}. "
+            f"Future assets must have DateIn in {candidate_years} and DateIn <= model_year. "
+            f"Examples: {bad}"
+        )
+
+    return candidate_relevant & datein.isin(candidate_years) & (datein <= model_year)
+
+
+def get_existing_capacity_derating_config(electricity_config):
+    config = electricity_config.get("existing_capacity_derating", {}) or {}
+    if not config.get("enabled", False):
+        return {"enabled": False}
+
+    factor = float(config["factor"])
+    if factor < 0 or factor > 1:
+        raise ValueError(
+            "existing_capacity_derating.factor must be between 0 and 1."
+        )
+
+    return {
+        "enabled": True,
+        "factor": factor,
+        "existing_cutoff_year": int(config["existing_cutoff_year"]),
+        "carriers": set(config.get("carriers", [])),
+    }
+
+
+def apply_existing_capacity_derating(
+    ppl, p_nom, candidate, derating_config, label
+):
+    if not derating_config.get("enabled", False) or ppl.empty:
+        return p_nom
+
+    datein = pd.to_numeric(
+        ppl.get("datein", pd.Series(np.nan, index=ppl.index)), errors="coerce"
+    )
+    existing = (
+        (datein.isna() | (datein <= derating_config["existing_cutoff_year"]))
+        & ~candidate
+    )
+    if derating_config.get("carriers"):
+        carrier = ppl.get("carrier", pd.Series("", index=ppl.index))
+        existing &= carrier.isin(derating_config["carriers"])
+
+    if existing.any():
+        factor = derating_config["factor"]
+        logger.info(
+            "Applying {:.0%} capacity derating to {} existing {} powerplants "
+            "with {:.2f} MW original capacity.".format(
+                1 - factor, existing.sum(), label, p_nom.loc[existing].sum()
+            )
+        )
+        p_nom = p_nom.copy()
+        p_nom.loc[existing] *= factor
+
+    return p_nom
+
+
+def apply_powerplant_candidate_nominal_attrs(
+    ppl, candidate_config, derating_config, label
+):
+    candidate = get_powerplant_candidate_mask(ppl, candidate_config, label)
+    derated_p_nom = apply_existing_capacity_derating(
+        ppl, ppl["p_nom"], candidate, derating_config, label
+    )
+    if not candidate_config.get("enabled", False):
+        return {
+            "candidate": candidate,
+            "p_nom": derated_p_nom,
+        }
+
+    return {
+        "candidate": candidate,
+        "p_nom": derated_p_nom.mask(candidate, 0.0),
+        "p_nom_min": derated_p_nom.where(~candidate, 0.0),
+        "p_nom_max": ppl["p_nom"].where(candidate, np.inf),
+        "p_nom_extendable": candidate,
+    }
+
+
+def get_hydro_project_energy_attrs(ppl, candidate, label):
+    annual = pd.to_numeric(
+        ppl.get("annualgeneration_gwh", pd.Series(np.nan, index=ppl.index)),
+        errors="coerce",
+    )
+    flh = pd.to_numeric(
+        ppl.get("fullloadhours_h", pd.Series(np.nan, index=ppl.index)),
+        errors="coerce",
+    )
+
+    invalid = candidate & (
+        annual.isna() | flh.isna() | (annual <= 0) | (flh <= 0) | (flh > 8760)
+    )
+    if invalid.any():
+        cols = [
+            col
+            for col in [
+                "name",
+                "technology",
+                "p_nom",
+                "datein",
+                "annualgeneration_gwh",
+                "fullloadhours_h",
+            ]
+            if col in ppl
+        ]
+        bad = ppl.loc[invalid, cols].to_dict("records")
+        raise ValueError(
+            f"Future {label} candidates require valid AnnualGeneration_GWh and "
+            "FullLoadHours_h values, with 0 < FullLoadHours_h <= 8760. "
+            f"Examples: {bad}"
+        )
+
+    return annual.where(candidate), flh.where(candidate), ppl["p_nom"].where(candidate)
+
+
+def scale_hydro_candidate_inflow_timeseries(
+    inflow_t, plants, candidate, label, cap_at_p_nom=False
+):
+    """
+    Use existing hydro inflow as relative shape and rescale future candidates
+    to project-specific annual generation.
+    """
+    if not candidate.any():
+        return inflow_t
+
+    candidate_plants = plants.loc[candidate].copy()
+    candidate_cols = candidate_plants.index.intersection(inflow_t.columns)
+    missing_cols = candidate_plants.index.difference(candidate_cols)
+    if not missing_cols.empty:
+        raise ValueError(
+            f"Future {label} candidates are missing hydro inflow profiles: "
+            f"{', '.join(map(str, missing_cols))}."
+        )
+
+    annual_generation_gwh = pd.to_numeric(
+        candidate_plants.loc[candidate_cols, "annualgeneration_gwh"], errors="coerce"
+    )
+    full_load_hours = pd.to_numeric(
+        candidate_plants.loc[candidate_cols, "fullloadhours_h"], errors="coerce"
+    )
+    capacity = pd.to_numeric(
+        candidate_plants.loc[candidate_cols, "p_nom"], errors="coerce"
+    )
+    invalid = (
+        annual_generation_gwh.isna()
+        | full_load_hours.isna()
+        | capacity.isna()
+        | (annual_generation_gwh <= 0)
+        | (full_load_hours <= 0)
+        | (full_load_hours > 8760)
+        | (capacity <= 0)
+    )
+    if invalid.any():
+        cols = [
+            col
+            for col in [
+                "name",
+                "technology",
+                "p_nom",
+                "datein",
+                "annualgeneration_gwh",
+                "fullloadhours_h",
+            ]
+            if col in candidate_plants
+        ]
+        bad = candidate_plants.loc[candidate_cols[invalid], cols].to_dict("records")
+        raise ValueError(
+            f"Invalid project-specific energy data for future {label} candidates. "
+            "AnnualGeneration_GWh, FullLoadHours_h and Capacity must be positive, "
+            f"and FullLoadHours_h must be <= 8760. Examples: {bad}"
+        )
+
+    selected = inflow_t.loc[:, candidate_cols]
+    original_mean = selected.mean(axis=0)
+    zero_mean = original_mean <= 0
+    if zero_mean.any():
+        bad = original_mean.index[zero_mean]
+        raise ValueError(
+            f"Future {label} candidates have zero-mean hydro inflow profiles and "
+            f"cannot be rescaled: {', '.join(map(str, bad))}."
+        )
+
+    relative = selected.divide(original_mean, axis=1)
+    target_mean = annual_generation_gwh * 1e3 / len(inflow_t.index)
+    scaled = relative.multiply(target_mean, axis=1)
+
+    if cap_at_p_nom:
+        for plant in candidate_cols:
+            shape = relative[plant].fillna(0.0)
+            plant_capacity = float(capacity.loc[plant])
+            target_mwh = float(annual_generation_gwh.loc[plant] * 1e3)
+            max_mwh = plant_capacity * len(shape)
+
+            if target_mwh >= max_mwh:
+                logger.warning(
+                    "%s candidate %s requests %.2f GWh/a, which reaches or "
+                    "exceeds the p_max_pu <= 1 limit of %.2f GWh/a. Capping "
+                    "at full output.",
+                    label,
+                    plant,
+                    target_mwh / 1e3,
+                    max_mwh / 1e3,
+                )
+                scaled[plant] = plant_capacity
+                continue
+
+            low = 0.0
+            high = float(target_mean.loc[plant])
+            while np.minimum(shape * high, plant_capacity).sum() < target_mwh:
+                high *= 2.0
+
+            for _ in range(60):
+                mid = (low + high) / 2.0
+                annual_mwh = np.minimum(shape * mid, plant_capacity).sum()
+                if annual_mwh < target_mwh:
+                    low = mid
+                else:
+                    high = mid
+
+            scaled[plant] = np.minimum(shape * high, plant_capacity)
+
+    result = inflow_t.copy()
+    result.loc[:, candidate_cols] = scaled
+    logger.info(
+        "Scaled %d future %s inflow profiles to project-specific annual "
+        "generation data (%.2f TWh/a target, %.2f TWh/a profile).",
+        len(candidate_cols),
+        label,
+        annual_generation_gwh.sum() / 1e3,
+        result.loc[:, candidate_cols].sum().sum() / 1e6,
+    )
+    return result
 
 
 def attach_load(n, demand_profiles):
@@ -453,7 +738,10 @@ def attach_conventional_generators(
     extendable_carriers,
     renewable_carriers,
     conventional_config,
+    extendable_existing_limits,
     conventional_inputs,
+    candidate_config,
+    derating_config,
 ):
     carriers = set(conventional_carriers) | (
         set(extendable_carriers["Generator"]) - set(renewable_carriers)
@@ -473,14 +761,71 @@ def attach_conventional_generators(
         )
     )
 
+    candidate = get_powerplant_candidate_mask(
+        ppl, candidate_config, "conventional"
+    )
+    derated_p_nom = apply_existing_capacity_derating(
+        ppl, ppl.p_nom, candidate, derating_config, "conventional"
+    )
+    if candidate_config.get("enabled", False):
+        extendable_existing = ppl.carrier.isin(extendable_carriers["Generator"])
+        p_nom_extendable = candidate | extendable_existing
+        p_nom = derated_p_nom.mask(candidate, 0.0)
+        p_nom_min = derated_p_nom.where(~candidate, 0.0)
+        p_nom_max = pd.Series(np.inf, index=ppl.index).where(~candidate, ppl.p_nom)
+        for carrier, limits in (extendable_existing_limits or {}).items():
+            carrier_extendable = extendable_existing & ppl.carrier.eq(carrier)
+            if not carrier_extendable.any():
+                continue
+
+            if "p_nom_min" in limits:
+                p_nom_min.loc[carrier_extendable] = float(limits["p_nom_min"])
+            if limits.get("p_nom_max") == "capacity":
+                p_nom_max.loc[carrier_extendable] = ppl.loc[
+                    carrier_extendable, "p_nom"
+                ]
+            elif "p_nom_max" in limits:
+                p_nom_max.loc[carrier_extendable] = float(limits["p_nom_max"])
+
+            invalid = carrier_extendable & (p_nom_min > p_nom_max)
+            if invalid.any():
+                bad = ppl.loc[invalid, ["name", "carrier", "p_nom"]].to_dict(
+                    "records"
+                )
+                raise ValueError(
+                    "Invalid extendable existing limits for conventional "
+                    f"{carrier} generators. Examples: {bad}"
+                )
+
+        if candidate.any():
+            logger.info(
+                "Treating {} conventional generators as build candidates with {:.2f} MW p_nom_max.".format(
+                    candidate.sum(), ppl.loc[candidate, "p_nom"].sum()
+                )
+            )
+        if extendable_existing.any():
+            logger.info(
+                "Allowing {} existing conventional generators to expand beyond their fixed minimum capacity.".format(
+                    extendable_existing.sum()
+                )
+            )
+    else:
+        p_nom_extendable = ppl.carrier.isin(extendable_carriers["Generator"])
+        p_nom = derated_p_nom.where(ppl.carrier.isin(conventional_carriers), 0)
+        p_nom_min = derated_p_nom.where(
+            ppl.carrier.isin(conventional_carriers), 0
+        )
+        p_nom_max = pd.Series(np.inf, index=ppl.index)
+
     n.madd(
         "Generator",
         ppl.index,
         carrier=ppl.carrier,
         bus=ppl.bus,
-        p_nom_min=ppl.p_nom.where(ppl.carrier.isin(conventional_carriers), 0),
-        p_nom=ppl.p_nom.where(ppl.carrier.isin(conventional_carriers), 0),
-        p_nom_extendable=ppl.carrier.isin(extendable_carriers["Generator"]),
+        p_nom_min=p_nom_min,
+        p_nom=p_nom,
+        p_nom_max=p_nom_max,
+        p_nom_extendable=p_nom_extendable,
         efficiency=ppl.efficiency,
         marginal_cost=ppl.marginal_cost,
         capital_cost=ppl.capital_cost,
@@ -508,7 +853,7 @@ def attach_conventional_generators(
                 n.generators.loc[idx, attr] = values
 
 
-def attach_hydro(n, costs, ppl):
+def attach_hydro(n, costs, ppl, candidate_config, derating_config):
     if "hydro" not in snakemake.params.renewable:
         return
     c = snakemake.params.renewable["hydro"]
@@ -568,32 +913,69 @@ def attach_hydro(n, costs, ppl):
                 )
 
     if "ror" in carriers and not ror.empty:
+        ror_nominal = apply_powerplant_candidate_nominal_attrs(
+            ror, candidate_config, derating_config, "run-of-river hydro"
+        )
+        ror_candidate = ror_nominal.pop("candidate")
+        if ror_candidate.any():
+            logger.info(
+                "Treating {} run-of-river hydro generators as build candidates with {:.2f} MW p_nom_max.".format(
+                    ror_candidate.sum(), ror.loc[ror_candidate, "p_nom"].sum()
+                )
+            )
+        (
+            ror_annual_generation,
+            ror_full_load_hours,
+            ror_candidate_capacity,
+        ) = get_hydro_project_energy_attrs(ror, ror_candidate, "run-of-river hydro")
+        ror_inflow_t = inflow_t.loc[:, ror.index].copy()
+        if ror_candidate.any():
+            ror_inflow_t = scale_hydro_candidate_inflow_timeseries(
+                ror_inflow_t,
+                ror,
+                ror_candidate,
+                "run-of-river hydro",
+                cap_at_p_nom=True,
+            )
         n.madd(
             "Generator",
             ror.index,
             carrier="ror",
             bus=ror["bus"],
-            p_nom=ror["p_nom"],
+            **ror_nominal,
             efficiency=costs.at["ror", "efficiency"],
             capital_cost=costs.at["ror", "capital_cost"],
             weight=ror["p_nom"],
             p_max_pu=(
-                inflow_t[ror.index]
+                ror_inflow_t
                 .divide(ror["p_nom"], axis=1)
                 .where(lambda df: df <= 1.0, other=1.0)
             ),
         )
+        n.generators.loc[ror.index, "annualgeneration_gwh"] = ror_annual_generation
+        n.generators.loc[ror.index, "fullloadhours_h"] = ror_full_load_hours
+        n.generators.loc[ror.index, "candidate_capacity_mw"] = ror_candidate_capacity
 
     if "PHS" in carriers and not phs.empty:
         # fill missing max hours to config value and
         # assume no natural inflow due to lack of data
         phs = phs.replace({"max_hours": {0: c["PHS_max_hours"]}})
+        phs_nominal = apply_powerplant_candidate_nominal_attrs(
+            phs, candidate_config, derating_config, "pumped-storage hydro"
+        )
+        phs_candidate = phs_nominal.pop("candidate")
+        if phs_candidate.any():
+            logger.info(
+                "Treating {} pumped-storage hydro units as build candidates with {:.2f} MW p_nom_max.".format(
+                    phs_candidate.sum(), phs.loc[phs_candidate, "p_nom"].sum()
+                )
+            )
         n.madd(
             "StorageUnit",
             phs.index,
             carrier="PHS",
             bus=phs["bus"],
-            p_nom=phs["p_nom"],
+            **phs_nominal,
             capital_cost=costs.at["PHS", "capital_cost"],
             max_hours=phs["max_hours"],
             efficiency_store=np.sqrt(costs.at["PHS", "efficiency"]),
@@ -604,7 +986,7 @@ def attach_hydro(n, costs, ppl):
     if "hydro" in carriers and not hydro.empty:
         hydro_max_hours = c.get("hydro_max_hours")
         hydro_stats = (
-            pd.read_csv(
+            read_csv_nafix(
                 snakemake.input.hydro_capacities,
                 comment="#",
                 na_values=["-"],
@@ -644,25 +1026,59 @@ def attach_hydro(n, costs, ppl):
             hydro.max_hours > 0, hydro.country.map(max_hours_country)
         ).fillna(hydro_max_hours_default)
 
+        hydro_nominal = apply_powerplant_candidate_nominal_attrs(
+            hydro, candidate_config, derating_config, "reservoir hydro"
+        )
+        hydro_candidate = hydro_nominal.pop("candidate")
+        if hydro_candidate.any():
+            logger.info(
+                "Treating {} reservoir hydro units as build candidates with {:.2f} MW p_nom_max.".format(
+                    hydro_candidate.sum(), hydro.loc[hydro_candidate, "p_nom"].sum()
+                )
+            )
+        existing_hydro_capital_cost = (
+            costs.at["hydro", "capital_cost"] if c.get("hydro_capital_cost") else 0.0
+        )
+        hydro_capital_cost = pd.Series(existing_hydro_capital_cost, index=hydro.index)
+        hydro_capital_cost.loc[hydro_candidate] = costs.at["hydro", "capital_cost"]
+        (
+            hydro_annual_generation,
+            hydro_full_load_hours,
+            hydro_candidate_capacity,
+        ) = get_hydro_project_energy_attrs(hydro, hydro_candidate, "reservoir hydro")
+        hydro_inflow_t = inflow_t.loc[:, hydro.index].copy()
+        if hydro_candidate.any():
+            hydro_inflow_t = scale_hydro_candidate_inflow_timeseries(
+                hydro_inflow_t,
+                hydro,
+                hydro_candidate,
+                "reservoir hydro",
+            )
+            hydro_efficiency = costs.at["hydro", "efficiency"]
+            hydro_inflow_t.loc[:, hydro_candidate] = (
+                hydro_inflow_t.loc[:, hydro_candidate] / hydro_efficiency
+            )
+
         n.madd(
             "StorageUnit",
             hydro.index,
             carrier="hydro",
             bus=hydro["bus"],
-            p_nom=hydro["p_nom"],
+            **hydro_nominal,
             max_hours=hydro_max_hours,
-            capital_cost=(
-                costs.at["hydro", "capital_cost"]
-                if c.get("hydro_capital_cost")
-                else 0.0
-            ),
+            capital_cost=hydro_capital_cost,
             marginal_cost=costs.at["hydro", "marginal_cost"],
             p_max_pu=1.0,  # dispatch
             p_min_pu=0.0,  # store
             efficiency_dispatch=costs.at["hydro", "efficiency"],
             efficiency_store=0.0,
             cyclic_state_of_charge=True,
-            inflow=inflow_t.loc[:, hydro.index],
+            inflow=hydro_inflow_t,
+        )
+        n.storage_units.loc[hydro.index, "annualgeneration_gwh"] = hydro_annual_generation
+        n.storage_units.loc[hydro.index, "fullloadhours_h"] = hydro_full_load_hours
+        n.storage_units.loc[hydro.index, "candidate_capacity_mw"] = (
+            hydro_candidate_capacity
         )
 
 
@@ -873,6 +1289,10 @@ if __name__ == "__main__":
         renewable_carriers = set(snakemake.params.renewable)
 
     extendable_carriers = snakemake.params.electricity["extendable_carriers"]
+    candidate_config = get_powerplant_candidate_config(snakemake.params.electricity)
+    derating_config = get_existing_capacity_derating_config(
+        snakemake.params.electricity
+    )
     if not (set(renewable_carriers) & set(extendable_carriers["Generator"])):
         logger.warning(
             "No renewables found in config entry `extendable_carriers`. "
@@ -894,7 +1314,10 @@ if __name__ == "__main__":
         extendable_carriers,
         renewable_carriers,
         snakemake.params.conventional,
+        snakemake.params.electricity.get("extendable_existing_carrier_limits", {}),
         conventional_inputs,
+        candidate_config,
+        derating_config,
     )
     attach_wind_and_solar(
         n,
@@ -905,7 +1328,7 @@ if __name__ == "__main__":
         extendable_carriers,
         snakemake.params.length_factor,
     )
-    attach_hydro(n, costs, ppl)
+    attach_hydro(n, costs, ppl, candidate_config, derating_config)
 
     if snakemake.params.electricity.get("estimate_renewable_capacities"):
         estimate_renewable_capacities_irena(

@@ -48,6 +48,111 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 # absolute path to config.default.yaml
 CONFIG_DEFAULT_PATH = os.path.join(BASE_DIR, "config.default.yaml")
 
+COPERNICUS_CRS = "EPSG:4326"  # projection for Copernicus data, used by atlite. "EPSG:4326" is the standard used by OSM and google maps
+
+
+def _horizon_keys(planning_horizon):
+    """Return supported lookup keys for a planning-horizon override mapping."""
+    keys = [planning_horizon, str(planning_horizon)]
+    try:
+        keys.append(int(planning_horizon))
+    except (TypeError, ValueError):
+        pass
+    return keys
+
+
+def _deep_update(base, override):
+    """Recursively merge override into base without mutating either input."""
+    if not isinstance(base, dict) or not isinstance(override, dict):
+        return override
+
+    merged = {k: _deep_update(v, {}) if isinstance(v, dict) else v for k, v in base.items()}
+    for key, value in override.items():
+        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+            merged[key] = _deep_update(merged[key], value)
+        else:
+            merged[key] = _deep_update(value, {}) if isinstance(value, dict) else value
+    return merged
+
+
+def resolve_by_planning_horizon(value, planning_horizon):
+    """
+    Apply a by_planning_horizon override to a config value.
+
+    Configs without the key are returned unchanged. For mappings with the key,
+    the base mapping is recursively merged with the selected horizon override
+    and the helper key is removed from the returned value.
+    """
+    if not isinstance(value, dict) or "by_planning_horizon" not in value:
+        return value
+
+    overrides = value.get("by_planning_horizon") or {}
+    selected = {}
+    for key in _horizon_keys(planning_horizon):
+        if key in overrides:
+            selected = overrides[key] or {}
+            break
+
+    base = {k: v for k, v in value.items() if k != "by_planning_horizon"}
+    return _deep_update(base, selected)
+
+
+def resolve_config_by_planning_horizon(config, planning_horizon):
+    """Resolve all top-level by_planning_horizon config sections for a horizon."""
+    if planning_horizon is None:
+        return config
+
+    resolved = {}
+    for key, value in config.items():
+        resolved[key] = resolve_by_planning_horizon(value, planning_horizon)
+    return resolved
+
+
+def resolve_h2export_for_planning_horizon(config, h2export, planning_horizon):
+    """
+    Resolve the real H2 export quantity for a scenario label and horizon.
+
+    The wildcard h2export remains the scenario label used in filenames. If no
+    export.h2export_by_planning_horizon mapping exists, the label is interpreted
+    as the real export quantity for backward compatibility.
+    """
+    export_config = config.get("export", {}) or {}
+    by_path = export_config.get("h2export_by_planning_horizon") or {}
+    label_keys = [h2export, str(h2export)]
+    try:
+        label_keys.append(float(h2export))
+    except (TypeError, ValueError):
+        pass
+
+    selected_path = None
+    for key in label_keys:
+        if key in by_path:
+            selected_path = by_path[key]
+            break
+
+    if selected_path is None:
+        return float(h2export)
+
+    for key in _horizon_keys(planning_horizon):
+        if key in selected_path:
+            return float(selected_path[key])
+
+    raise KeyError(
+        f"No H2 export value configured for scenario {h2export!r} "
+        f"and planning horizon {planning_horizon!r}."
+    )
+
+
+def resolve_snakemake_config_by_planning_horizon(snakemake):
+    """Resolve snakemake.config for scripts with a planning_horizons wildcard."""
+    planning_horizon = getattr(snakemake.wildcards, "planning_horizons", None)
+    if planning_horizon is None:
+        return snakemake.config
+    snakemake.config = resolve_config_by_planning_horizon(
+        snakemake.config, planning_horizon
+    )
+    return snakemake.config
+
 
 def check_config_version(config, fp_config=CONFIG_DEFAULT_PATH):
     """
@@ -766,7 +871,10 @@ def read_csv_nafix(file, **kwargs):
     if "na_values" not in kwargs:
         kwargs["na_values"] = NA_VALUES
 
-    if os.stat(file).st_size > 0:
+    if isinstance(file, str) and (file.startswith("http://") or file.startswith("https://")):
+        return pd.read_csv(file, **kwargs)
+
+    if os.path.exists(file) and os.stat(file).st_size > 0:
         return pd.read_csv(file, **kwargs)
     else:
         return pd.DataFrame()
@@ -1148,7 +1256,7 @@ def prepare_costs(
     Applies currency conversion, fills missing values, and computes fixed annualized costs.
     Always uses the module-level reference_year.
     """
-    costs = pd.read_csv(cost_file, index_col=[0, 1]).sort_index()
+    costs = read_csv_nafix(cost_file, index_col=[0, 1]).sort_index()
 
     # correct units to MW
     costs.loc[costs.unit.str.contains("/kW"), "value"] *= 1e3
@@ -1370,7 +1478,7 @@ def override_component_attrs(directory):
     for component, list_name in components.list_name.items():
         fn = f"{directory}/{list_name}.csv"
         if os.path.isfile(fn):
-            overrides = pd.read_csv(fn, index_col=0, na_values="n/a")
+            overrides = read_csv_nafix(fn, index_col=0, na_values="n/a")
             attrs[component] = overrides.combine_first(attrs[component])
 
     return attrs
@@ -1900,7 +2008,7 @@ def rename_techs(label):
     rename_if_contains_dict = {
         "water tanks": "hot water storage",
         "retrofitting": "building retrofitting",
-        "H2": "hydrogen storage",
+        "H2": "H2",
         "battery": "battery storage",
         "CCS": "CCS",
     }

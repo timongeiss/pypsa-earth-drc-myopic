@@ -69,6 +69,7 @@ from _helpers import (
     BASE_DIR,
     configure_logging,
     create_logger,
+    resolve_snakemake_config_by_planning_horizon,
     sanitize_carriers,
     sanitize_locations,
 )
@@ -190,6 +191,79 @@ def set_line_s_max_pu(n, s_max_pu):
     logger.info(f"N-1 security margin of lines set to {s_max_pu}")
 
 
+def set_b2b_converters_extendable(n, links, costs):
+    if not links.get("b2b_extendable", False):
+        return
+
+    if n.links.empty:
+        logger.warning("B2B converter expansion is enabled, but the network has no links.")
+        return
+
+    b2b = n.links.carrier == "B2B"
+    if not b2b.any():
+        logger.warning(
+            "B2B converter expansion is enabled, but no B2B converter links were found."
+        )
+        return
+
+    cost = links.get("b2b_capital_cost", "HVDC inverter pair")
+    if isinstance(cost, str):
+        if cost not in costs.index:
+            raise KeyError(
+                f"links.b2b_capital_cost references '{cost}', but this technology "
+                "is not available in the loaded cost assumptions."
+            )
+        cost = costs.at[cost, "capital_cost"]
+
+    n.links.loc[b2b, "p_nom_min"] = n.links.loc[b2b, "p_nom"]
+    n.links.loc[b2b, "p_nom_extendable"] = True
+    n.links.loc[b2b, "capital_cost"] = n.links.loc[b2b, "capital_cost"].where(
+        n.links.loc[b2b, "capital_cost"] > 0, float(cost)
+    )
+
+    logger.info(
+        "Enabled expansion for %d B2B converter links with existing capacity %.2f GW.",
+        int(b2b.sum()),
+        n.links.loc[b2b, "p_nom"].sum() / 1e3,
+    )
+
+
+def set_zero_initial_capacity_lines(n, lines_s_nom, lines):
+    prefixes = lines.get("zero_initial_capacity_prefixes", [])
+    if isinstance(prefixes, str):
+        prefixes = [prefixes]
+
+    prefixes = tuple(str(prefix) for prefix in prefixes if prefix)
+    if not prefixes:
+        return lines_s_nom
+
+    zero_initial = pd.Series(
+        n.lines.index.astype(str).str.startswith(prefixes), index=n.lines.index
+    )
+    if "line_id" in n.lines:
+        zero_initial |= n.lines["line_id"].fillna("").astype(str).str.startswith(
+            prefixes
+        )
+    if not zero_initial.any():
+        logger.warning(
+            "No lines matched zero_initial_capacity_prefixes=%s.", list(prefixes)
+        )
+        return lines_s_nom
+
+    lines_s_nom = lines_s_nom.copy()
+    lines_s_nom.loc[zero_initial] = 0.0
+    n.lines.loc[zero_initial, "s_nom"] = 0.0
+    n.lines.loc[zero_initial, "s_nom_min"] = 0.0
+    n.lines.loc[zero_initial, "s_nom_extendable"] = True
+
+    logger.info(
+        "Set zero initial capacity for %d line corridors matching prefixes %s.",
+        int(zero_initial.sum()),
+        list(prefixes),
+    )
+    return lines_s_nom
+
+
 def set_transmission_limit(n, ll_type, factor, costs, lines, links):
     links_dc_b = n.links.carrier == "DC" if not n.links.empty else pd.Series()
 
@@ -200,14 +274,10 @@ def set_transmission_limit(n, ll_type, factor, costs, lines, links):
         * n.lines.bus0.map(n.buses.v_nom)
     )
     lines_s_nom = n.lines.s_nom.where(n.lines.type == "", _lines_s_nom)
-
-    col = "capital_cost" if ll_type == "c" else "length"
-    ref = (
-        lines_s_nom @ n.lines[col]
-        + n.links.loc[links_dc_b, "p_nom"] @ n.links.loc[links_dc_b, col]
-    )
+    initial_lines_s_nom = lines_s_nom.copy()
 
     update_transmission_costs(n, costs)
+    set_b2b_converters_extendable(n, links, costs)
 
     if factor == "opt" or float(factor) > 1.0:
         n.lines["s_nom_min"] = lines_s_nom
@@ -216,8 +286,16 @@ def set_transmission_limit(n, ll_type, factor, costs, lines, links):
         n.links.loc[links_dc_b, "p_nom_min"] = n.links.loc[links_dc_b, "p_nom"]
         n.links.loc[links_dc_b, "p_nom_extendable"] = True
 
+    lines_s_nom = set_zero_initial_capacity_lines(n, lines_s_nom, lines)
+
+    col = "capital_cost" if ll_type == "c" else "length"
+    ref = (
+        lines_s_nom @ n.lines[col]
+        + n.links.loc[links_dc_b, "p_nom"] @ n.links.loc[links_dc_b, col]
+    )
+
     if ll_type == "l":
-        n.lines["s_nom_max"] = n.lines["s_nom"] * float(factor)
+        n.lines["s_nom_max"] = initial_lines_s_nom * float(factor)
         n.links.loc[links_dc_b, "p_nom_max"] = n.links.loc[links_dc_b, "p_nom"] * float(
             factor
         )
@@ -344,6 +422,7 @@ if __name__ == "__main__":
             # configfile="test/config.sector.yaml",
         )
 
+    resolve_snakemake_config_by_planning_horizon(snakemake)
     configure_logging(snakemake)
 
     opts = snakemake.wildcards.opts.split("-")

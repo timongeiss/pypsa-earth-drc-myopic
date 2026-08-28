@@ -113,6 +113,7 @@ from _helpers import (
     create_logger,
     locate_bus,
     read_csv_nafix,
+    resolve_snakemake_config_by_planning_horizon,
     to_csv_nafix,
     two_digits_2_name_country,
 )
@@ -299,13 +300,14 @@ if __name__ == "__main__":
 
         snakemake = mock_snakemake("build_powerplants")
 
+    resolve_snakemake_config_by_planning_horizon(snakemake)
     configure_logging(snakemake)
 
     with open(snakemake.input.pm_config, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
-    filepath_osm_ppl = snakemake.input.osm_powerplants
     filepath_osm2pm_ppl = snakemake.output.powerplants_osm2pm
+    filepath_osm_ppl = snakemake.input.get("osm_powerplants")
 
     n = pypsa.Network(snakemake.input.base_network)
     countries_codes = n.buses.country.unique()
@@ -323,11 +325,15 @@ if __name__ == "__main__":
                 "Please check file configs/powerplantmatching_config.yaml"
             )
         logger.info("Parsing OSM generator data to powerplantmatching format")
-        config["EXTERNAL_DATABASE"]["fn"] = os.path.join(
-            os.getcwd(), filepath_osm2pm_ppl
-        )
+        config["EXTERNAL_DATABASE"]["fn"] = os.path.join(os.getcwd(), filepath_osm2pm_ppl)
     else:
         # create an empty file
+        with open(filepath_osm2pm_ppl, "w"):
+            pass
+
+    if filepath_osm_ppl:
+        convert_osm_to_pm(filepath_osm_ppl, filepath_osm2pm_ppl)
+    else:
         with open(filepath_osm2pm_ppl, "w"):
             pass
 

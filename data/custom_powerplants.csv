@@ -1,1 +1,117 @@
-Name,Fueltype,Technology,Set,Country,Capacity,Efficiency,Duration,Volume_Mm3,DamHeight_m,StorageCapacity_MWh,DateIn,DateRetrofit,DateOut,lat,lon,EIC,projectID,bus
+Unnamed: 0,Name,Fueltype,Technology,Set,Country,Capacity,Efficiency,Duration,Volume_Mm3,DamHeight_m,StorageCapacity_MWh,DateIn,DateRetrofit,DateOut,lat,lon,EIC,projectID,bus,region_id,AnnualGeneration_GWh,FullLoadHours_h
+0,Mwadingusha,Hydro,Reservoir,PP,CD,78.0,,50.0,,,,1928.0,,,-10.7452,27.2447,,,,,,
+1,Zilo,Hydro,Reservoir,PP,CD,108.0,,50.0,,,,1952.0,,,-10.4998,25.4631,,,,,,
+2,Zongo,Hydro,Run-Of-River,PP,CD,225.0,,,,,,1955.0,,,-4.7823,14.9045,,,,,,
+3,Koni,Hydro,Reservoir,PP,CD,35.5,,50.0,,,,1950.0,,,-10.7184,27.2839,,,,,,
+4,Ruzizi I,Hydro,Run-Of-River,PP,CD,31.1,,,,,,1958.0,,,-2.6334,28.9027,,,,,,
+5,Inga I+II,Hydro,Reservoir,PP,CD,1775.0,,50.0,,,,1972.0,,,-5.5218,13.6213,,,,,,
+6,Seke,Hydro,Reservoir,PP,CD,260.0,,50.0,,,,1956.0,,,-10.3046,25.4059,,,,,,
+7,Ruzizi II,Hydro,Reservoir,PP,CD,26.5,,50.0,,,,1958.0,,,-2.509,28.8753,,,,,,
+8,Katende,Hydro,Run-Of-River,PP,CD,64.0,,,,,,2016.0,,,-6.3581,22.4472,,,,,,
+9,Rutshuru,Hydro,Reservoir,PP,CD,13.8,,50.0,,,,2015.0,,,-1.2258,29.46,,,,,,
+10,Busanga,Hydro,Reservoir,PP,CD,240.0,,50.0,,,,2021.0,,,-10.0904,25.3931,,,,,,
+11,Piana Mwanga,Hydro,Run-Of-River,PP,CD,54.0,,,,,,2015.0,,,-7.6486,28.0933,,,,,,
+12,Nzoro,Hydro,Run-Of-River,PP,CD,28.4,,,,,,2015.0,,,3.3125,29.4886,,,,,,
+13,Tshopo,Hydro,Run-Of-River,PP,CD,19.7,,,,,,2015.0,,,0.5381,25.186,,,,,,
+14,Bendera,Hydro,Run-Of-River,PP,CD,17.2,,,,,,2015.0,,,-5.0335,28.9492,,,,,,
+15,Luviro,Hydro,Run-Of-River,PP,CD,14.6,,,,,,2015.0,,,-0.0946,29.0491,,,,,,
+16,Rwanguba,Hydro,Run-Of-River,PP,CD,14.0,,,,,,2015.0,,,-1.2315,29.4691,,,,,,
+17,Talihya-Nord I,Hydro,Run-Of-River,PP,CD,13.8,,,,,,2015.0,,,0.1164,29.4307,,,,,,
+18,Budana,Hydro,Run-Of-River,PP,CD,12.5,,,,,,2015.0,,,1.5619,30.1632,,,,,,
+19,Mobayi-Mbongo,Hydro,Run-Of-River,PP,CD,11.4,,,,,,2015.0,,,4.3078,21.1842,,,,,,
+20,Sanga,Hydro,Run-Of-River,PP,CD,11.0,,,,,,2015.0,,,-4.8422,14.9585,,,,,,
+21,Azambi,Hydro,Run-Of-River,PP,CD,10.1,,,,,,2015.0,,,3.1904,29.4982,,,,,,
+22,Kilubi,Hydro,Run-Of-River,PP,CD,9.9,,,,,,2015.0,,,-8.0413,25.2758,,,,,,
+23,Kakobola,Hydro,Run-Of-River,PP,CD,9.0,,,,,,2015.0,,,-5.6465,19.0605,,,,,,
+24,Tshiala II,Hydro,Run-Of-River,PP,CD,6.0,,,,,,2015.0,,,-6.0804,23.7729,,,,,,
+25,Lutshurukuru,Hydro,Run-Of-River,PP,CD,5.6,,,,,,2015.0,,,-2.6425,26.6212,,,,,,
+26,Kalule,Hydro,Run-Of-River,PP,CD,2.0,,,,,,2015.0,,,-9.9627,25.9037,,,,,,
+27,Punia,Hydro,Reservoir,PP,CD,2.0,,50.0,,,,2015.0,,,-1.4259,26.4935,,,,,,
+28,Lungudi,Hydro,Run-Of-River,PP,CD,1.5,,,,,,2015.0,,,-6.5015,20.8895,,,,,,
+29,Mutwanga,Hydro,Run-Of-River,PP,CD,1.4,,,,,,2015.0,,,0.3417,29.7583,,,,,,
+30,Lubudi,Hydro,Run-Of-River,PP,CD,1.0,,,,,,2015.0,,,-10.0055,25.8939,,,,,,
+31,Soleniama,Hydro,Run-Of-River,PP,CD,5.0,,,,,,2015.0,,,1.6379,30.2625,,,,,,
+32,Katwakirundi,Hydro,Run-Of-River,PP,CD,5.0,,,,,,2015.0,,,0.0594,29.3077,,,,,,
+33,Zulu,Hydro,Run-Of-River,PP,CD,5.0,,,,,,2015.0,,,3.3855,20.2104,,,,,,
+34,Mugombe,Hydro,Run-Of-River,PP,CD,5.0,,,,,,2015.0,,,-3.0581,28.246,,,,,,
+67,Kibamba,Hydro,Reservoir,PP,CD,530.0,,50.0,,,,2035.0,,,-8.25,28.86,,,,,2150.0,4057.0
+68,Kalumba,Hydro,Reservoir,PP,CD,780.0,,50.0,,,,2035.0,,,-8.06,28.77,,,,,3140.0,4026.0
+69,Nondo,Hydro,Reservoir,PP,CD,1080.0,,50.0,,,,2035.0,,,-7.88,28.55,,,,,4360.0,4037.0
+70,Kilwani,Hydro,Reservoir,PP,CD,320.0,,50.0,,,,2035.0,,,-7.8,28.35,,,,,1310.0,4094.0
+71,Piana Mwanga,Hydro,Reservoir,PP,CD,800.0,,50.0,,,,2035.0,,,-7.65,28.09,,,,,3230.0,4038.0
+72,Pweto,Hydro,Reservoir,PP,CD,350.0,,50.0,,,,2035.0,,,-8.47,28.9,,,,,1400.0,4000.0
+73,Chirundu,Hydro,Reservoir,PP,CD,920.0,,50.0,,,,2035.0,,,-0.74,25.5,,,,,4690.0,5100.0
+74,Ubundu,Hydro,Reservoir,PP,CD,860.0,,50.0,,,,2035.0,,,0.17,26.3,,,,,4400.0,5100.0
+75,Kisangani,Hydro,Reservoir,PP,CD,1920.0,,50.0,,,,2035.0,,,0.52,25.2,,,,,9770.0,5100.0
+76,Nzilo 2,Hydro,Reservoir,PP,CD,120.0,,50.0,,,,2035.0,,,-10.5,25.46,,,,,720.0,6000.0
+77,Kalenge,Hydro,Reservoir,PP,CD,69.0,,50.0,,,,2035.0,,,-9.27,25.73,,,,,420.0,6087.0
+78,Kiubo,Hydro,Reservoir,PP,CD,45.0,,50.0,,,,2035.0,,,-9.52,27.04,,,,,248.0,5511.0
+79,Sombwe,Hydro,Reservoir,PP,CD,168.0,,50.0,,,,2035.0,,,-9.39,26.94,,,,,966.0,5750.0
+80,Kaziba,Hydro,Reservoir,PP,CD,125.0,,50.0,,,,2035.0,,,-9.21,26.74,,,,,750.0,6000.0
+81,Upemba,Hydro,Reservoir,PP,CD,30.0,,50.0,,,,2035.0,,,-9.02,26.58,,,,,180.0,6000.0
+82,Dipeta,Hydro,Reservoir,PP,CD,30.0,,50.0,,,,2035.0,,,-9.77,26.02,,,,,180.0,6000.0
+83,Kakienga,Hydro,Reservoir,PP,CD,20.0,,50.0,,,,2035.0,,,-9.15,25.59,,,,,120.0,6000.0
+84,Kimimbi-Fuka,Hydro,Reservoir,PP,CD,70.0,,50.0,,,,2035.0,,,-9.08,25.53,,,,,420.0,6000.0
+85,Kasai Level 1,Hydro,Run-Of-River,PP,CD,420.0,,,,,,2035.0,,,-6.63,21.12,,,,,1890.0,4500.0
+86,Kasai Level 2,Hydro,Run-Of-River,PP,CD,110.0,,,,,,2035.0,,,-6.56,20.96,,,,,495.0,4500.0
+87,Kasai Level 3,Hydro,Run-Of-River,PP,CD,770.0,,,,,,2035.0,,,-6.54,20.93,,,,,3470.0,4506.0
+88,Kasai Level 4,Hydro,Run-Of-River,PP,CD,1700.0,,,,,,2035.0,,,-6.51,20.89,,,,,7650.0,4500.0
+89,Kwango Level 1,Hydro,Run-Of-River,PP,CD,230.0,,,,,,2035.0,,,-5.6,16.62,,,,,1040.0,4522.0
+90,Kwango Level 2,Hydro,Run-Of-River,PP,CD,470.0,,,,,,2035.0,,,-5.5,16.65,,,,,2120.0,4511.0
+91,Kwango Level 3,Hydro,Run-Of-River,PP,CD,640.0,,,,,,2035.0,,,-4.74,16.9,,,,,2880.0,4500.0
+92,Kwango Level 4,Hydro,Run-Of-River,PP,CD,480.0,,,,,,2035.0,,,-4.08,17.12,,,,,2160.0,4500.0
+93,Kwango Level 5,Hydro,Run-Of-River,PP,CD,450.0,,,,,,2035.0,,,-3.35,17.37,,,,,2030.0,4511.0
+94,Uele Level 1,Hydro,Run-Of-River,PP,CD,110.0,,,,,,2035.0,,,3.64,28.09,,,,,500.0,4545.0
+95,Uele Level 2,Hydro,Run-Of-River,PP,CD,290.0,,,,,,2035.0,,,3.68,27.62,,,,,1100.0,3793.0
+96,Uele Level 3,Hydro,Run-Of-River,PP,CD,120.0,,,,,,2035.0,,,3.72,27.15,,,,,600.0,5000.0
+97,Uele Level 4,Hydro,Run-Of-River,PP,CD,110.0,,,,,,2035.0,,,3.76,26.68,,,,,500.0,4545.0
+98,Uele Level 5,Hydro,Run-Of-River,PP,CD,280.0,,,,,,2035.0,,,3.8,26.21,,,,,1300.0,4643.0
+99,Uele Level 6,Hydro,Run-Of-River,PP,CD,220.0,,,,,,2035.0,,,3.83,25.74,,,,,1000.0,4545.0
+100,Uele Level 7,Hydro,Run-Of-River,PP,CD,650.0,,,,,,2035.0,,,3.87,25.27,,,,,2900.0,4462.0
+101,Uele Level 8,Hydro,Run-Of-River,PP,CD,470.0,,,,,,2035.0,,,3.91,24.8,,,,,2200.0,4681.0
+102,Uele Level 9,Hydro,Run-Of-River,PP,CD,250.0,,,,,,2035.0,,,3.95,24.33,,,,,1100.0,4400.0
+103,Uele Level 10,Hydro,Run-Of-River,PP,CD,100.0,,,,,,2035.0,,,3.99,23.86,,,,,500.0,5000.0
+104,Uele Level 11,Hydro,Run-Of-River,PP,CD,930.0,,,,,,2035.0,,,4.02,23.39,,,,,4300.0,4624.0
+105,Uele Level 12,Hydro,Run-Of-River,PP,CD,420.0,,,,,,2035.0,,,4.06,22.92,,,,,1900.0,4524.0
+106,Grand Inga,Hydro,Reservoir,PP,CD,60000.0,,50.0,,,,2050.0,,,-5.54,13.55,,,,,372200.0,6200.0
+107,Pioka,Hydro,Reservoir,PP,CD,35000.0,,50.0,,,,2050.0,,,-4.89,14.399,,,,,221200.0,6320.0
+108,BANDUNDU_AC_2025_oil_generator,Oil,Oil,PP,CD,1.0,,,,,,2015.0,,2030.0,-3.7863,16.81502,,,BANDUNDU_AC_2025,,,
+109,BOMA_AC_2025_oil_generator,Oil,Oil,PP,CD,1.0,,,,,,2015.0,,2030.0,-5.77658,13.06105,,,BOMA_AC_2025,,,
+110,BUKAVU_RUZIZI_AC_2025_oil_generator,Oil,Oil,PP,CD,1.0,,,,,,2015.0,,2030.0,-2.54499,28.79645,,,BUKAVU_RUZIZI_AC_2025,,,
+111,GBADOLITE_AC_2025_oil_generator,Oil,Oil,PP,CD,1.0,,,,,,2015.0,,2030.0,4.3056,21.1854,,,GBADOLITE_AC_2025,,,
+112,GOMA_AC_2025_oil_generator,Oil,Oil,PP,CD,1.0,,,,,,2015.0,,2030.0,-1.645,29.20767,,,GOMA_AC_2025,,,
+113,MATADI_INGA_AC_2025_oil_generator,Oil,Oil,PP,CD,1.0,,,,,,2015.0,,2030.0,-5.5219,13.6229,,,MATADI_INGA_AC_2025,,,
+114,KALEMIE_AC_2025_oil_generator,Oil,Oil,PP,CD,1.0,,,,,,2015.0,,2030.0,-5.47635,29.062,,,KALEMIE_AC_2025,,,
+115,KANANGA_AC_2025_oil_generator,Oil,Oil,PP,CD,1.0,,,,,,2015.0,,2030.0,-5.9904,22.4484,,,KANANGA_AC_2025,,,
+116,KIKWIT_KAKOBOLA_AC_2025_oil_generator,Oil,Oil,PP,CD,1.0,,,,,,2015.0,,2030.0,-5.0942,18.7936,,,KIKWIT_KAKOBOLA_AC_2025,,,
+117,KINDU_AC_2025_oil_generator,Oil,Oil,PP,CD,1.0,,,,,,2015.0,,2030.0,-2.6416,26.6208,,,KINDU_AC_2025,,,
+118,KINSHASA_AC_2025_oil_generator,Oil,Oil,PP,CD,1.0,,,,,,2015.0,,2030.0,-4.42721,15.33906,,,KINSHASA_AC_2025,,,
+119,KISANGANI_AC_2025_oil_generator,Oil,Oil,PP,CD,1.0,,,,,,2015.0,,2030.0,0.5792,25.1898,,,KISANGANI_AC_2025,,,
+120,KISENGE_AC_2025_oil_generator,Oil,Oil,PP,CD,1.0,,,,,,2015.0,,2030.0,-10.56,23.62,,,KISENGE_AC_2025,,,
+121,KOLWEZI_AC_2025_oil_generator,Oil,Oil,PP,CD,38.0,,,,,,2015.0,,2030.0,-10.5661,25.33183,,,KOLWEZI_AC_2025,,,
+122,LIKASI_AC_2025_oil_generator,Oil,Oil,PP,CD,40.0,,,,,,2015.0,,2030.0,-11.004,26.7369,,,LIKASI_AC_2025,,,
+123,LUBUMBASHI_AC_2025_oil_generator,Oil,Oil,PP,CD,1.0,,,,,,2015.0,,2030.0,-12.19183,27.91289,,,LUBUMBASHI_AC_2025,,,
+124,MANONO_AC_2025_oil_generator,Oil,Oil,PP,CD,1.0,,,,,,2015.0,,2030.0,-7.6483,28.094,,,MANONO_AC_2025,,,
+125,MBANDAKA_AC_2025_oil_generator,Oil,Oil,PP,CD,1.0,,,,,,2015.0,,2030.0,0.048,18.267,,,MBANDAKA_AC_2025,,,
+126,MBUJI_MAYI_AC_2025_oil_generator,Oil,Oil,PP,CD,1.0,,,,,,2015.0,,2030.0,-6.11805,23.6937,,,MBUJI_MAYI_AC_2025,,,
+127,ZONGO_AC_2025_oil_generator,Oil,Oil,PP,CD,1.0,,,,,,2015.0,,2030.0,-4.79643,14.91708,,,ZONGO_AC_2025,,,
+128,BANDUNDU_AC_2025_oil_backup_2025opt_for_2035,Oil,Oil,PP,CD,1.0007367726579202,,,,,,2035.0,,2040.0,-3.7863,16.81502,,generated_2025_oil_carryover_2035,BANDUNDU_AC_2025,,,
+129,BOMA_AC_2025_oil_backup_2025opt_for_2035,Oil,Oil,PP,CD,1.0005953024585854,,,,,,2035.0,,2040.0,-5.77658,13.06105,,generated_2025_oil_carryover_2035,BOMA_AC_2025,,,
+130,BUKAVU_RUZIZI_AC_2025_oil_backup_2025opt_for_2035,Oil,Oil,PP,CD,20.37324630445151,,,,,,2035.0,,2040.0,-2.54499,28.79645,,generated_2025_oil_carryover_2035,BUKAVU_RUZIZI_AC_2025,,,
+131,GBADOLITE_AC_2025_oil_backup_2025opt_for_2035,Oil,Oil,PP,CD,19.25043333444756,,,,,,2035.0,,2040.0,4.3056,21.1854,,generated_2025_oil_carryover_2035,GBADOLITE_AC_2025,,,
+132,GOMA_AC_2025_oil_backup_2025opt_for_2035,Oil,Oil,PP,CD,2.4346473475759534,,,,,,2035.0,,2040.0,-1.645,29.20767,,generated_2025_oil_carryover_2035,GOMA_AC_2025,,,
+133,MATADI_INGA_AC_2025_oil_backup_2025opt_for_2035,Oil,Oil,PP,CD,1.0006074724812675,,,,,,2035.0,,2040.0,-5.5219,13.6229,,generated_2025_oil_carryover_2035,MATADI_INGA_AC_2025,,,
+134,KALEMIE_AC_2025_oil_backup_2025opt_for_2035,Oil,Oil,PP,CD,1.0007844878544658,,,,,,2035.0,,2040.0,-5.47635,29.062,,generated_2025_oil_carryover_2035,KALEMIE_AC_2025,,,
+135,KANANGA_AC_2025_oil_backup_2025opt_for_2035,Oil,Oil,PP,CD,1.0006329408050851,,,,,,2035.0,,2040.0,-5.9904,22.4484,,generated_2025_oil_carryover_2035,KANANGA_AC_2025,,,
+136,KIKWIT_KAKOBOLA_AC_2025_oil_backup_2025opt_for_2035,Oil,Oil,PP,CD,1.0007811110001976,,,,,,2035.0,,2040.0,-5.0942,18.7936,,generated_2025_oil_carryover_2035,KIKWIT_KAKOBOLA_AC_2025,,,
+137,KINDU_AC_2025_oil_backup_2025opt_for_2035,Oil,Oil,PP,CD,22.29405752742066,,,,,,2035.0,,2040.0,-2.6416,26.6208,,generated_2025_oil_carryover_2035,KINDU_AC_2025,,,
+138,KINSHASA_AC_2025_oil_backup_2025opt_for_2035,Oil,Oil,PP,CD,1.0008522212852016,,,,,,2035.0,,2040.0,-4.42721,15.33906,,generated_2025_oil_carryover_2035,KINSHASA_AC_2025,,,
+139,KISANGANI_AC_2025_oil_backup_2025opt_for_2035,Oil,Oil,PP,CD,20.8621779232956,,,,,,2035.0,,2040.0,0.5792,25.1898,,generated_2025_oil_carryover_2035,KISANGANI_AC_2025,,,
+140,KISENGE_AC_2025_oil_backup_2025opt_for_2035,Oil,Oil,PP,CD,1.001354005238605,,,,,,2035.0,,2040.0,-10.56,23.62,,generated_2025_oil_carryover_2035,KISENGE_AC_2025,,,
+141,KOLWEZI_AC_2025_oil_backup_2025opt_for_2035,Oil,Oil,PP,CD,38.00029087628486,,,,,,2035.0,,2040.0,-10.5661,25.33183,,generated_2025_oil_carryover_2035,KOLWEZI_AC_2025,,,
+142,LIKASI_AC_2025_oil_backup_2025opt_for_2035,Oil,Oil,PP,CD,40.000168226053226,,,,,,2035.0,,2040.0,-11.004,26.7369,,generated_2025_oil_carryover_2035,LIKASI_AC_2025,,,
+143,LUBUMBASHI_AC_2025_oil_backup_2025opt_for_2035,Oil,Oil,PP,CD,1.001090429876805,,,,,,2035.0,,2040.0,-12.19183,27.91289,,generated_2025_oil_carryover_2035,LUBUMBASHI_AC_2025,,,
+144,MANONO_AC_2025_oil_backup_2025opt_for_2035,Oil,Oil,PP,CD,1.0000037686550223,,,,,,2035.0,,2040.0,-7.6483,28.094,,generated_2025_oil_carryover_2035,MANONO_AC_2025,,,
+145,MBANDAKA_AC_2025_oil_backup_2025opt_for_2035,Oil,Oil,PP,CD,20.468248915024454,,,,,,2035.0,,2040.0,0.048,18.267,,generated_2025_oil_carryover_2035,MBANDAKA_AC_2025,,,
+146,MBUJI_MAYI_AC_2025_oil_backup_2025opt_for_2035,Oil,Oil,PP,CD,1.000383840844774,,,,,,2035.0,,2040.0,-6.11805,23.6937,,generated_2025_oil_carryover_2035,MBUJI_MAYI_AC_2025,,,
+147,ZONGO_AC_2025_oil_backup_2025opt_for_2035,Oil,Oil,PP,CD,1.0001284352015285,,,,,,2035.0,,2040.0,-4.79643,14.91708,,generated_2025_oil_carryover_2035,ZONGO_AC_2025,,,

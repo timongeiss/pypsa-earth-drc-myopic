@@ -202,7 +202,14 @@ import numpy as np
 import pandas as pd
 import progressbar as pgb
 import xarray as xr
-from _helpers import BASE_DIR, configure_logging, create_logger
+from _helpers import (
+    BASE_DIR,
+    COPERNICUS_CRS,
+    configure_logging,
+    create_logger,
+    read_csv_nafix,
+    resolve_snakemake_config_by_planning_horizon,
+)
 from add_electricity import load_powerplants
 from dask.distributed import Client
 from pypsa.geo import haversine
@@ -213,7 +220,6 @@ cc = coco.CountryConverter()
 logger = create_logger(__name__)
 
 
-COPERNICUS_CRS = "EPSG:4326"
 GEBCO_CRS = "EPSG:4326"
 PPL_CRS = "EPSG:4326"
 
@@ -240,7 +246,9 @@ def check_cutout_match(cutout, geodf):
 
 def get_eia_annual_hydro_generation(fn, countries):
     # in billion kWh/a = TWh/a
-    df = pd.read_csv(fn, skiprows=1, index_col=1, na_values=[" ", "--"]).iloc[1:, 1:]
+    df = read_csv_nafix(fn, skiprows=1, index_col=1, na_values=[" ", "--"])
+    df = df.apply(pd.to_numeric, errors="coerce")
+    df = df.iloc[1:, 1:]
     df.index = df.index.str.strip()
 
     df.loc["Germany"] = df.filter(like="Germany", axis=0).sum()
@@ -259,7 +267,7 @@ def get_eia_annual_hydro_generation(fn, countries):
 
 def get_hydro_capacities_annual_hydro_generation(fn, countries, year):
     hydro_stats = (
-        pd.read_csv(
+        read_csv_nafix(
             fn,
             comment="#",
             keep_default_na=False,
@@ -482,11 +490,398 @@ def rescale_hydro(plants, runoff, normalize_using_yearly, normalization_year):
     return runoff
 
 
+def bounded_mean_rescale(values, lower_bound, upper_bound, target_mean=1.0):
+    """Multiplicatively rescale values to target_mean without leaving bounds."""
+    values = np.asarray(values, dtype=float)
+    if not lower_bound < target_mean < upper_bound:
+        raise ValueError(
+            "Hydro literature-envelope clipping requires lower_bound < target_mean "
+            f"< upper_bound, got {lower_bound}, {target_mean}, {upper_bound}."
+        )
+
+    def clipped_mean(factor):
+        return float(np.nanmean(np.clip(values * factor, lower_bound, upper_bound)))
+
+    low = 0.0
+    high = 1.0
+    while clipped_mean(high) < target_mean:
+        high *= 2.0
+        if high > 1e6:
+            raise ValueError(
+                "Hydro literature-envelope clipping could not preserve annual "
+                "energy within the configured bounds."
+            )
+
+    for _ in range(80):
+        mid = (low + high) / 2.0
+        if clipped_mean(mid) < target_mean:
+            low = mid
+        else:
+            high = mid
+
+    return np.clip(values * high, lower_bound, upper_bound)
+
+
+def get_hydro_literature_envelope_bounds(
+    low_ratio,
+    high_ratio,
+    tolerance_fraction,
+    minimum_clip_ratio,
+):
+    """Derive fixed relative clipping bounds from literature reference ratios."""
+    literature_range = high_ratio - low_ratio
+    lower_bound = max(minimum_clip_ratio, low_ratio - tolerance_fraction * literature_range)
+    upper_bound = high_ratio + tolerance_fraction * literature_range
+    if not 0 < lower_bound < 1.0 < upper_bound:
+        raise ValueError(
+            "Hydro literature-envelope clipping requires bounds around 1.0, "
+            f"got {lower_bound:.3f}-{upper_bound:.3f}."
+        )
+    return lower_bound, upper_bound
+
+
+def rescale_hydro_literature_envelope_clip_profile(
+    relative,
+    low_ratio,
+    high_ratio,
+    tolerance_fraction,
+    minimum_clip_ratio,
+    preserve_annual_energy=True,
+):
+    """Clip original profiles to a fixed literature-derived envelope."""
+    lower_bound, upper_bound = get_hydro_literature_envelope_bounds(
+        low_ratio=low_ratio,
+        high_ratio=high_ratio,
+        tolerance_fraction=tolerance_fraction,
+        minimum_clip_ratio=minimum_clip_ratio,
+    )
+    relative_plant_time = relative.transpose("plant", "time")
+    values = relative_plant_time.values.astype(float, copy=False)
+    smoothed_values = np.full(values.shape, np.nan, dtype=float)
+    plant_ids = np.asarray(relative_plant_time.coords["plant"].values)
+
+    for idx, plant in enumerate(plant_ids):
+        plant_values = values[idx]
+        if not np.isfinite(plant_values).any():
+            raise ValueError(
+                "Hydro literature-envelope clipping found no finite values "
+                f"for plant {plant}."
+            )
+        clipped = np.clip(plant_values, lower_bound, upper_bound)
+        if preserve_annual_energy:
+            clipped = bounded_mean_rescale(
+                clipped,
+                lower_bound=lower_bound,
+                upper_bound=upper_bound,
+                target_mean=1.0,
+            )
+
+        smoothed_values[idx] = clipped
+
+    smoothed = xr.DataArray(
+        smoothed_values,
+        coords=relative_plant_time.coords,
+        dims=relative_plant_time.dims,
+    )
+
+    return smoothed.transpose(*relative.dims)
+
+
+def smooth_hydro_inflow(inflow, hydro_plants, config):
+    """
+    Smooth selected hydro inflow profiles while preserving annual plant energy.
+    """
+    smooth_config = config.get("smooth_inflow", {}) or {}
+    if not smooth_config.get("enabled", False):
+        return inflow
+
+    method = smooth_config.get("method", "fixed_literature_envelope_clip")
+    supported_methods = {"fixed_literature_envelope_clip"}
+    if method not in supported_methods:
+        raise ValueError(
+            "Unsupported hydro smooth_inflow method "
+            f"'{method}'. Supported methods are: "
+            + ", ".join(sorted(supported_methods))
+        )
+
+    target = smooth_config.get("target", "buses")
+    if target != "buses":
+        raise ValueError(
+            "Unsupported hydro smooth_inflow target "
+            f"'{target}'. Only bus-based smoothing is implemented."
+        )
+
+    buses = smooth_config.get("buses", [])
+    if not buses:
+        raise ValueError("Hydro smooth_inflow is enabled but no buses are configured.")
+
+    low_ratio = float(smooth_config.get("low_ratio", 0.756))
+    high_ratio = float(smooth_config.get("high_ratio", 1.366))
+    tolerance_fraction = float(smooth_config.get("tolerance_fraction", 0.5))
+    minimum_clip_ratio = float(smooth_config.get("minimum_clip_ratio", 0.05))
+    if low_ratio <= 0 or high_ratio <= low_ratio:
+        raise ValueError(
+            "Hydro smooth_inflow requires 0 < low_ratio < high_ratio, "
+            f"got {low_ratio} and {high_ratio}."
+        )
+    if tolerance_fraction < 0:
+        raise ValueError(
+            "Hydro smooth_inflow requires tolerance_fraction >= 0, "
+            f"got {tolerance_fraction}."
+        )
+    if minimum_clip_ratio <= 0:
+        raise ValueError(
+            "Hydro smooth_inflow requires minimum_clip_ratio > 0, "
+            f"got {minimum_clip_ratio}."
+        )
+
+    plant_mask = hydro_plants["bus"].isin(buses)
+    technologies = smooth_config.get("technologies")
+    if technologies:
+        plant_mask &= hydro_plants["technology"].isin(technologies)
+
+    configured_plants = pd.Index(hydro_plants.index[plant_mask])
+    available_plants = pd.Index(inflow.indexes["plant"])
+    plants = configured_plants.intersection(available_plants)
+    missing_plants = configured_plants.difference(available_plants)
+
+    if not missing_plants.empty:
+        logger.warning(
+            "Hydro smooth_inflow selected plants without inflow profiles: "
+            + ", ".join(map(str, missing_plants))
+        )
+
+    if plants.empty:
+        logger.warning(
+            "Hydro smooth_inflow is enabled but no matching plants with inflow "
+            "profiles were found."
+        )
+        return inflow
+
+    selected = inflow.sel(plant=plants)
+    original_mean = selected.mean("time", skipna=True)
+    valid_plants = original_mean.plant.where(original_mean > 0, drop=True).values
+    if len(valid_plants) == 0:
+        logger.warning(
+            "Hydro smooth_inflow selected only zero-mean inflow profiles; "
+            "leaving inflow unchanged."
+        )
+        return inflow
+
+    if len(valid_plants) < len(plants):
+        skipped = pd.Index(plants).difference(pd.Index(valid_plants))
+        logger.warning(
+            "Hydro smooth_inflow skipped zero-mean inflow profiles: "
+            + ", ".join(map(str, skipped))
+        )
+
+    selected = selected.sel(plant=valid_plants)
+    original_mean = original_mean.sel(plant=valid_plants)
+    relative = selected / original_mean
+
+    preserve_annual_energy = smooth_config.get("preserve_annual_energy", True)
+    smoothed_relative = rescale_hydro_literature_envelope_clip_profile(
+        relative,
+        low_ratio=low_ratio,
+        high_ratio=high_ratio,
+        tolerance_fraction=tolerance_fraction,
+        minimum_clip_ratio=minimum_clip_ratio,
+        preserve_annual_energy=preserve_annual_energy,
+    )
+
+    smoothed = smoothed_relative * original_mean
+    result = inflow.copy()
+    result.loc[dict(plant=valid_plants)] = smoothed
+
+    lower_bound, upper_bound = get_hydro_literature_envelope_bounds(
+        low_ratio=low_ratio,
+        high_ratio=high_ratio,
+        tolerance_fraction=tolerance_fraction,
+        minimum_clip_ratio=minimum_clip_ratio,
+    )
+    logger.info(
+        "Applied hydro inflow fixed literature-envelope clipping to %d "
+        "plants on buses %s with relative profile bounds %.3f-%.3f "
+        "(low %.3f, high %.3f, tolerance %.2f).",
+        len(valid_plants),
+        ", ".join(map(str, buses)),
+        lower_bound,
+        upper_bound,
+        low_ratio,
+        high_ratio,
+        tolerance_fraction,
+    )
+
+    return result
+
+
+def get_hydro_candidate_mask(hydro_plants, candidate_config):
+    if not candidate_config.get("enabled", False) or hydro_plants.empty:
+        return pd.Series(False, index=hydro_plants.index)
+
+    datein = pd.to_numeric(
+        hydro_plants.get("datein", pd.Series(np.nan, index=hydro_plants.index)),
+        errors="coerce",
+    )
+    model_year = int(candidate_config["model_year"])
+    cutoff_year = int(candidate_config["existing_cutoff_year"])
+    candidate_years = [int(year) for year in candidate_config["candidate_datein"]]
+
+    return (
+        datein.notna()
+        & (datein > cutoff_year)
+        & (datein <= model_year)
+        & datein.isin(candidate_years)
+    )
+
+
+def scale_hydro_candidate_inflows(
+    inflow,
+    hydro_plants,
+    candidate_config,
+):
+    """
+    Scale future hydro candidate inflows to project-specific annual generation.
+    """
+    candidate = get_hydro_candidate_mask(hydro_plants, candidate_config)
+    if not candidate.any():
+        return inflow
+
+    required = ["annualgeneration_gwh", "fullloadhours_h", "p_nom"]
+    missing_cols = [col for col in required if col not in hydro_plants.columns]
+    if missing_cols:
+        raise ValueError(
+            "Future hydro candidates require columns "
+            f"{required}; missing {missing_cols}."
+        )
+
+    available_plants = pd.Index(inflow.indexes["plant"])
+    candidate_plants = pd.Index(hydro_plants.index[candidate])
+    plants = candidate_plants.intersection(available_plants)
+    missing_profile = candidate_plants.difference(available_plants)
+    if not missing_profile.empty:
+        raise ValueError(
+            "Future hydro candidates are missing inflow profiles in "
+            f"profile_hydro.nc: {', '.join(map(str, missing_profile))}."
+        )
+
+    candidates = hydro_plants.loc[plants].copy()
+    annual_generation_gwh = pd.to_numeric(
+        candidates["annualgeneration_gwh"], errors="coerce"
+    )
+    full_load_hours = pd.to_numeric(candidates["fullloadhours_h"], errors="coerce")
+    capacity = pd.to_numeric(candidates["p_nom"], errors="coerce")
+
+    invalid = (
+        annual_generation_gwh.isna()
+        | full_load_hours.isna()
+        | capacity.isna()
+        | (annual_generation_gwh <= 0)
+        | (full_load_hours <= 0)
+        | (full_load_hours > 8760)
+        | (capacity <= 0)
+    )
+    if invalid.any():
+        cols = [
+            col
+            for col in [
+                "name",
+                "technology",
+                "p_nom",
+                "datein",
+                "annualgeneration_gwh",
+                "fullloadhours_h",
+            ]
+            if col in candidates
+        ]
+        bad = candidates.loc[invalid, cols].to_dict("records")
+        raise ValueError(
+            "Invalid project-specific hydro energy data for future candidates. "
+            "AnnualGeneration_GWh, FullLoadHours_h and Capacity must be positive, "
+            f"and FullLoadHours_h must be <= 8760. Examples: {bad}"
+        )
+
+    selected = inflow.sel(plant=plants)
+    original_mean = selected.mean("time", skipna=True)
+    zero_mean = original_mean <= 0
+    if bool(zero_mean.any()):
+        bad = pd.Index(original_mean.plant.where(zero_mean, drop=True).values)
+        raise ValueError(
+            "Future hydro candidates have zero-mean inflow profiles and cannot "
+            f"be rescaled: {', '.join(map(str, bad))}."
+        )
+
+    relative = selected / original_mean
+    target_mean = xr.DataArray(
+        annual_generation_gwh.reindex(plants).values * 1e3 / selected.sizes["time"],
+        dims=["plant"],
+        coords={"plant": plants},
+    )
+    scaled = relative * target_mean
+
+    ror_plants = pd.Index(
+        candidates.index[candidates["technology"].astype(str).eq("Run-Of-River")]
+    ).intersection(plants)
+    if not ror_plants.empty:
+        for plant in ror_plants:
+            shape = relative.sel(plant=plant).fillna(0.0)
+            plant_capacity = float(capacity.loc[plant])
+            target_mwh = float(annual_generation_gwh.loc[plant] * 1e3)
+            max_mwh = plant_capacity * shape.sizes["time"]
+
+            if target_mwh >= max_mwh:
+                logger.warning(
+                    "Run-of-river hydro candidate %s requests %.2f GWh/a, "
+                    "which reaches or exceeds the p_max_pu <= 1 limit of "
+                    "%.2f GWh/a. Capping at full output.",
+                    plant,
+                    target_mwh / 1e3,
+                    max_mwh / 1e3,
+                )
+                scaled.loc[dict(plant=plant)] = plant_capacity
+                continue
+
+            low = 0.0
+            high = float(target_mean.sel(plant=plant))
+            while float(xr.where(shape * high > plant_capacity, plant_capacity, shape * high).sum()) < target_mwh:
+                high *= 2.0
+
+            for _ in range(60):
+                mid = (low + high) / 2.0
+                annual_mwh = float(
+                    xr.where(shape * mid > plant_capacity, plant_capacity, shape * mid)
+                    .sum()
+                )
+                if annual_mwh < target_mwh:
+                    low = mid
+                else:
+                    high = mid
+
+            scaled.loc[dict(plant=plant)] = xr.where(
+                shape * high > plant_capacity,
+                plant_capacity,
+                shape * high,
+            )
+
+    result = inflow.copy()
+    result.loc[dict(plant=plants)] = scaled
+
+    logger.info(
+        "Scaled %d future hydro candidate inflow profiles to project-specific "
+        "annual generation data (%.2f TWh/a target, %.2f TWh/a profile).",
+        len(plants),
+        annual_generation_gwh.sum() / 1e3,
+        float(result.sel(plant=plants).sum()) / 1e6,
+    )
+    return result
+
+
 if __name__ == "__main__":
     if "snakemake" not in globals():
         from _helpers import mock_snakemake
 
         snakemake = mock_snakemake("build_renewable_profiles", technology="hydro")
+    resolve_snakemake_config_by_planning_horizon(snakemake)
     configure_logging(snakemake)
 
     pgb.streams.wrap_stderr()
@@ -502,6 +897,7 @@ if __name__ == "__main__":
     # crs
     geo_crs = snakemake.params.crs["geo_crs"]
     area_crs = snakemake.params.crs["area_crs"]
+    copernicus_crs = COPERNICUS_CRS
 
     if isinstance(config.get("copernicus", {}), list):
         config["copernicus"] = {"grid_codes": config["copernicus"]}
@@ -563,14 +959,28 @@ if __name__ == "__main__":
             set(all_hydro_ppls.index).difference(set(hydro_ppls.index))
         )
 
-        resource["plants"] = hydro_ppls.rename(columns={"country": "countries"})[
-            ["lon", "lat", "countries"]
-        ]
+        hydro_plants = hydro_ppls.rename(columns={"country": "countries"})
+        resource["plants"] = hydro_plants[["lon", "lat", "countries"]].copy()
 
-        # TODO: possibly revise to account for non-existent hydro powerplants
-        resource["plants"]["installed_hydro"] = [
-            True for bus_id in resource["plants"].index
-        ]
+        candidate_config = (
+            snakemake.config.get("electricity", {}).get(
+                "custom_powerplant_candidates", {}
+            )
+            or {}
+        )
+        if candidate_config.get("enabled", False):
+            datein = pd.to_numeric(
+                hydro_plants.get(
+                    "datein", pd.Series(np.nan, index=hydro_plants.index)
+                ),
+                errors="coerce",
+            )
+            existing_cutoff_year = int(candidate_config["existing_cutoff_year"])
+            resource["plants"]["installed_hydro"] = datein.isna() | (
+                datein <= existing_cutoff_year
+            )
+        else:
+            resource["plants"]["installed_hydro"] = True
 
         # get normalization before executing runoff
         normalization = None
@@ -618,6 +1028,10 @@ if __name__ == "__main__":
                 logger.info("No hydro normalization")
 
             inflow *= config.get("multiplier", 1.0)
+            inflow = smooth_hydro_inflow(inflow, hydro_plants, config)
+            inflow = scale_hydro_candidate_inflows(
+                inflow, hydro_plants, candidate_config
+            )
 
             # add zero values for out of hydrobasins elements
             if len(bus_notin_hydrobasins) > 0:
@@ -657,14 +1071,14 @@ if __name__ == "__main__":
                 paths.copernicus,
                 codes=copernicus["grid_codes"],
                 invert=True,
-                crs=COPERNICUS_CRS,
+                crs=copernicus_crs,
             )
             if "distance" in copernicus and config["copernicus"]["distance"] > 0:
                 excluder.add_raster(
                     paths.copernicus,
                     codes=copernicus["distance_grid_codes"],
                     buffer=copernicus["distance"],
-                    crs=COPERNICUS_CRS,
+                    crs=copernicus_crs,
                 )
 
         if "max_depth" in config:

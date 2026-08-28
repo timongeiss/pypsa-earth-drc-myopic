@@ -86,7 +86,14 @@ import numpy as np
 import pandas as pd
 import pypsa
 import xarray as xr
-from _helpers import configure_logging, create_logger, override_component_attrs
+from _helpers import (
+    configure_logging,
+    create_logger,
+    override_component_attrs,
+    read_csv_nafix,
+    resolve_h2export_for_planning_horizon,
+    resolve_snakemake_config_by_planning_horizon,
+)
 from linopy import merge
 from pypsa.descriptors import get_switchable_as_dense as get_as_dense
 from pypsa.optimization.abstract import optimize_transmission_expansion_iteratively
@@ -215,16 +222,37 @@ def add_CCL_constraints(n, config):
     """
     agg_p_nom_limits = config["electricity"].get("agg_p_nom_limits")
 
+    planning_horizon = getattr(snakemake.wildcards, "planning_horizons", None)
+    if planning_horizon is None:
+        planning_horizons = config.get("scenario", {}).get("planning_horizons", [])
+        if planning_horizons:
+            planning_horizon = planning_horizons[0]
+        else:
+            planning_horizon = config.get("costs", {}).get("year")
+
+    if planning_horizon is None:
+        raise ValueError(
+            "CCL constraints are enabled, but no planning horizon could be "
+            "derived from snakemake wildcards, scenario.planning_horizons, "
+            "or costs.year."
+        )
+
     try:
-        agg_p_nom_minmax = pd.read_csv(
+        agg_p_nom_minmax = read_csv_nafix(
             snakemake.input.agg_p_nom_minmax, index_col=list(range(2)), header=[0, 1]
-        )[snakemake.wildcards.planning_horizons]
+        )[str(planning_horizon)]
     except IOError:
         logger.exception(
             "Need to specify the path to a .csv file containing "
             "aggregate capacity limits per country in "
             "config['electricity']['agg_p_nom_limit']."
         )
+    except KeyError as exc:
+        raise KeyError(
+            f"CCL constraints are enabled for planning horizon {planning_horizon}, "
+            "but this column is missing in "
+            f"{snakemake.input.agg_p_nom_minmax}."
+        ) from exc
     logger.info(
         "Adding per carrier generation capacity constraints for " "individual countries"
     )
@@ -713,6 +741,274 @@ def add_h2_network_cap(n, cap):
     n.model.add_constraints(lhs <= rhs, name="h2_network_cap")
 
 
+def add_pv_synchronous_penetration_constraint(n, snapshots, config):
+    """
+    Limit instantaneous PV dispatch relative to synchronous hydro dispatch.
+
+    The constraint is national and time-resolved:
+    sum(PV dispatch)_t <= max_ratio * sum(synchronous hydro dispatch)_t.
+    """
+    penetration_config = (
+        config["electricity"].get("pv_synchronous_penetration_limit") or {}
+    )
+    if not penetration_config.get("enabled", False):
+        return
+
+    max_ratio = float(penetration_config["max_ratio"])
+    pv_carriers = penetration_config.get("pv_carriers", ["solar", "solar rooftop"])
+    sync_gen_carriers = penetration_config.get("synchronous_generator_carriers", ["ror"])
+    sync_storage_carriers = penetration_config.get(
+        "synchronous_storage_unit_carriers", ["hydro"]
+    )
+
+    pv_i = n.generators.index[n.generators.carrier.isin(pv_carriers)]
+    if pv_i.empty:
+        logger.info(
+            "PV synchronous penetration limit is enabled, but no PV generators "
+            "with carriers %s exist. Skipping constraint.",
+            pv_carriers,
+        )
+        return
+
+    sync_gen_i = n.generators.index[n.generators.carrier.isin(sync_gen_carriers)]
+    sync_storage_i = n.storage_units.index[
+        n.storage_units.carrier.isin(sync_storage_carriers)
+    ]
+
+    if sync_gen_i.empty and sync_storage_i.empty:
+        raise ValueError(
+            "PV synchronous penetration limit is enabled, but no synchronous "
+            "hydro components were found. Expected Generator carriers "
+            f"{sync_gen_carriers} or StorageUnit carriers {sync_storage_carriers}."
+        )
+
+    pv_dispatch = n.model["Generator-p"].loc[:, pv_i].sum("Generator")
+
+    sync_dispatch = None
+    if not sync_gen_i.empty:
+        sync_dispatch = n.model["Generator-p"].loc[:, sync_gen_i].sum("Generator")
+
+    if not sync_storage_i.empty:
+        storage_dispatch = n.model["StorageUnit-p_dispatch"].loc[
+            :, sync_storage_i
+        ].sum("StorageUnit")
+        sync_dispatch = (
+            storage_dispatch if sync_dispatch is None else sync_dispatch + storage_dispatch
+        )
+
+    n.model.add_constraints(
+        pv_dispatch - max_ratio * sync_dispatch <= 0,
+        name="pv_synchronous_penetration_limit",
+    )
+    logger.info(
+        "Added national PV synchronous penetration limit with max_ratio %.3f "
+        "for PV carriers %s against synchronous Generator carriers %s and "
+        "StorageUnit carriers %s.",
+        max_ratio,
+        pv_carriers,
+        sync_gen_carriers,
+        sync_storage_carriers,
+    )
+
+
+def add_pv_min_full_load_hours_constraint(n, snapshots, config):
+    """
+    Enforce a minimum annual utilisation for nationally aggregated PV capacity.
+
+    sum_t(PV dispatch_t * snapshot_weight_t) >= min_flh * total_PV_capacity
+    """
+    flh_config = config["electricity"].get("pv_min_full_load_hours") or {}
+    if not flh_config.get("enabled", False):
+        return
+
+    min_flh = float(flh_config["min_flh"])
+    carriers = flh_config.get("carriers", ["solar", "solar rooftop"])
+
+    pv_i = n.generators.index[n.generators.carrier.isin(carriers)]
+    if pv_i.empty:
+        logger.info(
+            "PV minimum full-load-hours constraint is enabled, but no PV "
+            "generators with carriers %s exist. Skipping constraint.",
+            carriers,
+        )
+        return
+
+    ext_pv_i = n.generators.index[
+        n.generators.carrier.isin(carriers) & n.generators.p_nom_extendable
+    ]
+    fixed_pv_i = pv_i.difference(ext_pv_i)
+    fixed_capacity = n.generators.loc[fixed_pv_i, "p_nom"].sum()
+
+    if ext_pv_i.empty and fixed_capacity <= 0:
+        raise ValueError(
+            "PV minimum full-load-hours constraint is enabled, but the model "
+            f"contains no extendable or fixed positive PV capacity for carriers {carriers}."
+        )
+
+    weights = n.snapshot_weightings.generators.reindex(snapshots)
+    pv_generation = (n.model["Generator-p"].loc[:, pv_i] * weights).sum()
+
+    if ext_pv_i.empty:
+        pv_capacity = fixed_capacity
+    else:
+        pv_capacity = n.model["Generator-p_nom"].loc[ext_pv_i].sum() + float(
+            fixed_capacity
+        )
+
+    n.model.add_constraints(
+        pv_generation - min_flh * pv_capacity >= 0,
+        name="pv_min_full_load_hours",
+    )
+    logger.info(
+        "Added national PV minimum full-load-hours constraint with min_flh %.1f "
+        "for carriers %s.",
+        min_flh,
+        carriers,
+    )
+
+
+def add_hydro_candidate_annual_generation_constraint(n, snapshots, config):
+    """
+    Limit annual dispatch of hydro candidates to project-specific FLH.
+
+    sum_t dispatch_{h,t} * snapshot_weight_t <= FullLoadHours_h * p_nom_opt_h
+    """
+
+    def effective_full_load_hours(component_df, idx, label):
+        annual = pd.to_numeric(
+            component_df.get(
+                "annualgeneration_gwh", pd.Series(np.nan, index=component_df.index)
+            ),
+            errors="coerce",
+        ).reindex(idx)
+        candidate_capacity = pd.to_numeric(
+            component_df.get(
+                "candidate_capacity_mw", pd.Series(np.nan, index=component_df.index)
+            ),
+            errors="coerce",
+        ).reindex(idx)
+        flh = pd.to_numeric(
+            component_df.get(
+                "fullloadhours_h", pd.Series(np.nan, index=component_df.index)
+            ),
+            errors="coerce",
+        ).reindex(idx)
+
+        derived = annual * 1e3 / candidate_capacity
+        flh = derived.where(derived.notna() & (candidate_capacity > 0), flh)
+
+        invalid = flh.isna() | (flh <= 0) | (flh > 8760)
+        if invalid.any():
+            raise ValueError(
+                f"Hydro candidate annual generation limit for {label} requires "
+                "valid FullLoadHours_h, or AnnualGeneration_GWh plus "
+                "candidate_capacity_mw, with 0 < FLH <= 8760. Invalid entries: "
+                f"{', '.join(map(str, flh.index[invalid]))}"
+            )
+
+        return flh
+
+    def candidate_index(component_df, carriers):
+        if component_df.empty:
+            return pd.Index([])
+        has_flh = "fullloadhours_h" in component_df.columns
+        has_annual = "annualgeneration_gwh" in component_df.columns
+        has_capacity = "candidate_capacity_mw" in component_df.columns
+        if not (has_flh or (has_annual and has_capacity)):
+            return pd.Index([])
+
+        flh = pd.to_numeric(
+            component_df.get(
+                "fullloadhours_h", pd.Series(np.nan, index=component_df.index)
+            ),
+            errors="coerce",
+        )
+        annual = pd.to_numeric(
+            component_df.get(
+                "annualgeneration_gwh", pd.Series(np.nan, index=component_df.index)
+            ),
+            errors="coerce",
+        )
+        candidate_capacity = pd.to_numeric(
+            component_df.get(
+                "candidate_capacity_mw", pd.Series(np.nan, index=component_df.index)
+            ),
+            errors="coerce",
+        )
+        has_energy_metadata = (flh.notna() & (flh > 0)) | (
+            annual.notna()
+            & (annual > 0)
+            & candidate_capacity.notna()
+            & (candidate_capacity > 0)
+        )
+        extendable = component_df.get(
+            "p_nom_extendable", pd.Series(False, index=component_df.index)
+        ).fillna(False)
+        return component_df.index[
+            component_df.carrier.isin(carriers)
+            & extendable.astype(bool)
+            & has_energy_metadata
+        ]
+
+    gen_i = candidate_index(n.generators, ["ror"])
+    storage_i = candidate_index(n.storage_units, ["hydro"])
+
+    if gen_i.empty and storage_i.empty:
+        logger.info(
+            "No hydro candidates with FullLoadHours_h metadata found. "
+            "Skipping hydro candidate annual generation constraints."
+        )
+        return
+
+    if not gen_i.empty:
+        weights = n.snapshot_weightings.generators.reindex(snapshots)
+        flh = xr.DataArray(
+            effective_full_load_hours(n.generators, gen_i, "run-of-river generators")
+            .reindex(gen_i)
+            .values,
+            dims=["Generator"],
+            coords={"Generator": gen_i},
+        )
+        lhs = (n.model["Generator-p"].loc[:, gen_i] * weights).sum("snapshot")
+        p_nom = n.model["Generator-p_nom"].loc[gen_i].rename(
+            {"Generator-ext": "Generator"}
+        )
+        rhs = p_nom * flh
+        n.model.add_constraints(
+            lhs <= rhs,
+            name="hydro_candidate_annual_generation_limit_generators",
+        )
+        logger.info(
+            "Added annual generation limit for %d run-of-river hydro candidates.",
+            len(gen_i),
+        )
+
+    if not storage_i.empty:
+        weights = n.snapshot_weightings.stores.reindex(snapshots)
+        flh = xr.DataArray(
+            effective_full_load_hours(n.storage_units, storage_i, "hydro storage units")
+            .reindex(storage_i)
+            .values,
+            dims=["StorageUnit"],
+            coords={"StorageUnit": storage_i},
+        )
+        lhs = (
+            n.model["StorageUnit-p_dispatch"].loc[:, storage_i] * weights
+        ).sum("snapshot")
+        p_nom = n.model["StorageUnit-p_nom"].loc[storage_i].rename(
+            {"StorageUnit-ext": "StorageUnit"}
+        )
+        rhs = p_nom * flh
+        n.model.add_constraints(
+            lhs <= rhs,
+            name="hydro_candidate_annual_generation_limit_storage_units",
+        )
+        logger.info(
+            "Added annual generation limit for %d reservoir hydro candidates.",
+            len(storage_i),
+        )
+
+
 def hydrogen_temporal_constraint(n, n_ref, time_period):
     """
     Applies temporal constraints for hydrogen production based on renewable energy sources (RES)
@@ -948,7 +1244,7 @@ def add_existing(n):
             .replace("_presec", "")
             .replace(".nc", ".csv")
         )
-        df = pd.read_csv(directory + "/electrolyzer_caps_" + n_name, index_col=0)
+        df = read_csv_nafix(directory + "/electrolyzer_caps_" + n_name, index_col=0)
         existing_electrolyzers = df.p_nom_opt.values
 
         h2_index = n.links[n.links.carrier == "H2 Electrolysis"].index
@@ -956,10 +1252,10 @@ def add_existing(n):
 
         # n_name = snakemake.input.network.split("/")[-1].replace(str(snakemake.config["scenario"]["clusters"][0]), "").\
         #     replace(".nc", ".csv").replace(str(snakemake.config["costs"]["discountrate"][0]), "")
-        df = pd.read_csv(directory + "/res_caps_" + n_name, index_col=0)
+        df = read_csv_nafix(directory + "/res_caps_" + n_name, index_col=0)
 
         for tech in snakemake.config["custom_data"]["renewables"]:
-            # df = pd.read_csv(snakemake.config["custom_data"]["existing_renewables"], index_col=0)
+            # df = read_csv_nafix(snakemake.config["custom_data"]["existing_renewables"], index_col=0)
             existing_res = df.loc[tech]
             existing_res.index = existing_res.index.str.apply(lambda x: x + tech)
             tech_index = n.generators[n.generators.carrier == tech].index
@@ -1038,6 +1334,9 @@ def extra_functionality(n, snapshots):
     reserve = config["electricity"].get("operational_reserve", {})
     if reserve.get("activate"):
         add_operational_reserve_margin(n, snapshots, config)
+    add_pv_synchronous_penetration_constraint(n, snapshots, config)
+    add_pv_min_full_load_hours_constraint(n, snapshots, config)
+    add_hydro_candidate_annual_generation_constraint(n, snapshots, config)
     for o in opts:
         if "RES" in o:
             res_share = float(re.findall("[0-9]*\.?[0-9]+$", o)[0])
@@ -1058,8 +1357,18 @@ def extra_functionality(n, snapshots):
     temportal_matching_period = snakemake.params.policy_config["hydrogen"][
         "temporal_matching"
     ]
+    real_h2_export = None
+    if {"h2export", "planning_horizons"}.issubset(snakemake.wildcards.keys()):
+        real_h2_export = resolve_h2export_for_planning_horizon(
+            snakemake.config,
+            snakemake.wildcards["h2export"],
+            snakemake.wildcards["planning_horizons"],
+        )
 
-    if temportal_matching_period == "no_temporal_matching":
+    if real_h2_export == 0:
+        logger.info("Resolved H2 export is 0 TWh. Skipping H2 temporal constraint.")
+
+    elif temportal_matching_period == "no_temporal_matching":
         logger.info("no h2 temporal constraint set")
 
     elif additionality:
@@ -1158,6 +1467,7 @@ if __name__ == "__main__":
             configfile="config.tutorial.yaml",
         )
 
+    resolve_snakemake_config_by_planning_horizon(snakemake)
     configure_logging(snakemake)
 
     opts = snakemake.wildcards.opts.split("-")

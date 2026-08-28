@@ -284,6 +284,7 @@ def _aggregate_and_move_components(
     )
 
     generator_strategies = aggregation_strategies["generators"]
+    one_port_strategies = aggregation_strategies.get("one_ports", dict())
 
     carriers = set(n.generators.carrier) - set(exclude_carriers)
     generators, generators_pnl = aggregateoneport(
@@ -297,7 +298,12 @@ def _aggregate_and_move_components(
     replace_components(n, "Generator", generators, generators_pnl)
 
     for one_port in aggregate_one_ports:
-        df, pnl = aggregateoneport(n, busmap, component=one_port)
+        df, pnl = aggregateoneport(
+            n,
+            busmap,
+            component=one_port,
+            custom_strategies=one_port_strategies,
+        )
         replace_components(n, one_port, df, pnl)
 
     buses_to_del = n.buses.index.difference(busmap)
@@ -992,6 +998,7 @@ if __name__ == "__main__":
     exclude_carriers = snakemake.params.cluster_options["simplify_network"].get(
         "exclude_carriers", []
     )
+    cluster_config = snakemake.params.cluster_options["simplify_network"]
     hvdc_as_lines = snakemake.params.electricity["hvdc_as_lines"]
     aggregation_strategies = snakemake.params.aggregation_strategies
 
@@ -1023,21 +1030,25 @@ if __name__ == "__main__":
         Nyears,
     )
 
-    n, simplify_links_map = simplify_links(
-        n,
-        technology_costs,
-        snakemake.params.renewable,
-        hvdc_as_lines,
-        snakemake.params.config_lines,
-        snakemake.params.config_links,
-        snakemake.output,
-        exclude_carriers,
-        aggregation_strategies,
-    )
+    if cluster_config.get("simplify_links", True):
+        n, simplify_links_map = simplify_links(
+            n,
+            technology_costs,
+            snakemake.params.renewable,
+            hvdc_as_lines,
+            snakemake.params.config_lines,
+            snakemake.params.config_links,
+            snakemake.output,
+            exclude_carriers,
+            aggregation_strategies,
+        )
+    else:
+        with open(snakemake.output.connection_costs, "w") as fp:
+            pass
+        simplify_links_map = n.buses.index.to_series()
 
     busmaps = [trafo_map, simplify_links_map]
 
-    cluster_config = snakemake.params.cluster_options["simplify_network"]
     renewable_config = snakemake.params.renewable
     lines_length_factor = snakemake.params.config_lines["length_factor"]
     if cluster_config.get("remove_stubs", True):

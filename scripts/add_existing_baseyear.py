@@ -17,7 +17,7 @@ import pandas as pd
 import powerplantmatching as pm
 import pypsa
 import xarray as xr
-from _helpers import sanitize_carriers, sanitize_locations
+from _helpers import read_csv_nafix, sanitize_carriers, sanitize_locations
 
 # from _helpers import (
 #     configure_logging,
@@ -139,7 +139,7 @@ def add_power_capacities_installed_before_baseyear(n, grouping_years, costs, bas
         f"Adding power capacities installed before {baseyear} from powerplants.csv"
     )
 
-    df_agg = pd.read_csv(snakemake.input.powerplants, index_col=0)
+    df_agg = read_csv_nafix(snakemake.input.powerplants, index_col=0)
 
     rename_fuel = {
         "Hard Coal": "coal",
@@ -194,17 +194,40 @@ def add_power_capacities_installed_before_baseyear(n, grouping_years, costs, bas
     df_agg.drop(phased_out, inplace=True)
 
     # assign clustered bus
-    busmap_s = pd.read_csv(snakemake.input.busmap_s, index_col=0).squeeze()
-    busmap = pd.read_csv(snakemake.input.busmap, index_col=0).squeeze()
+    busmap_s = read_csv_nafix(snakemake.input.busmap_s, index_col=0).squeeze()
+    busmap = read_csv_nafix(snakemake.input.busmap, index_col=0).squeeze()
 
     inv_busmap = {}
     for k, v in busmap.items():
         inv_busmap[v] = inv_busmap.get(v, []) + [k]
 
     clustermaps = busmap_s.map(busmap)
-    clustermaps.index = clustermaps.index.astype(int)
+    bus_ids = df_agg.bus.dropna()
+    if not bus_ids.empty and pd.api.types.is_integer_dtype(bus_ids):
+        try:
+            clustermaps.index = clustermaps.index.astype(int)
+        except ValueError:
+            logger.warning(
+                "Busmap index contains non-numeric bus IDs; using string-based mapping."
+            )
 
     df_agg["cluster_bus"] = df_agg.bus.map(clustermaps)
+    missing_cluster_bus = df_agg["cluster_bus"].isna() & df_agg.bus.notna()
+    if missing_cluster_bus.any():
+        string_clustermaps = clustermaps.copy()
+        string_clustermaps.index = string_clustermaps.index.astype(str)
+        df_agg.loc[missing_cluster_bus, "cluster_bus"] = df_agg.loc[
+            missing_cluster_bus, "bus"
+        ].astype(str).map(string_clustermaps)
+
+    missing_cluster_bus = df_agg["cluster_bus"].isna() & df_agg.bus.notna()
+    if missing_cluster_bus.any():
+        examples = df_agg.loc[missing_cluster_bus, "bus"].astype(str).unique()[:8]
+        logger.warning(
+            "Could not map %s existing powerplants to clustered buses. Examples: %s",
+            missing_cluster_bus.sum(),
+            ", ".join(examples),
+        )
 
     # include renewables in df_agg
     add_existing_renewables(df_agg)
@@ -245,9 +268,17 @@ def add_power_capacities_installed_before_baseyear(n, grouping_years, costs, bas
         # capacity is the capacity in MW at each node for this
         capacity = df.loc[grouping_year, generator]
         capacity = capacity[~capacity.isna()]
-        capacity = capacity[
-            capacity > snakemake.params.existing_capacities["threshold_capacity"]
-        ]
+        threshold_by_carrier = (
+            snakemake.params.existing_capacities.get(
+                "threshold_capacity_by_carrier", {}
+            )
+            or {}
+        )
+        threshold_capacity = threshold_by_carrier.get(
+            generator,
+            snakemake.params.existing_capacities["threshold_capacity"],
+        )
+        capacity = capacity[capacity > threshold_capacity]
         suffix = "-ac" if generator == "offwind" else ""
         name_suffix = f" {generator}{suffix}-{grouping_year}"
         asset_i = capacity.index + name_suffix
@@ -360,6 +391,30 @@ def add_power_capacities_installed_before_baseyear(n, grouping_years, costs, bas
                     already_build.str.replace(name_suffix, "")
                 ].values
 
+            if generator == "oil":
+                baseyear_name_suffix = f" {generator}-{baseyear}"
+                baseyear_asset_i = capacity.index + baseyear_name_suffix
+                already_baseyear = n.links.index.intersection(baseyear_asset_i)
+
+                if not already_baseyear.empty:
+                    baseyear_nodes = already_baseyear.str.replace(
+                        baseyear_name_suffix,
+                        "",
+                        regex=False,
+                    )
+                    existing_capacity = capacity.loc[baseyear_nodes]
+                    efficiency = n.links.loc[
+                        already_baseyear,
+                        "efficiency",
+                    ].replace(0.0, costs.at[generator, "efficiency"])
+                    input_capacity = existing_capacity.values / efficiency.values
+
+                    n.links.loc[already_baseyear, "p_nom"] = input_capacity
+                    n.links.loc[already_baseyear, "p_nom_min"] = input_capacity
+                    n.links.loc[already_baseyear, "p_nom_extendable"] = True
+
+                    new_build = new_build.difference(baseyear_nodes + name_suffix)
+
             if not new_build.empty:
                 new_capacity = capacity.loc[new_build.str.replace(name_suffix, "")]
 
@@ -438,7 +493,7 @@ def add_heating_capacities_installed_before_baseyear(
     """
     logger.debug(f"Adding heating capacities installed before {baseyear}")
 
-    existing_heating = pd.read_csv(
+    existing_heating = read_csv_nafix(
         snakemake.input.existing_heating_distribution, header=[0, 1], index_col=0
     )
 

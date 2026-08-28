@@ -62,6 +62,7 @@ from _helpers import (
     create_logger,
     lossy_bidirectional_links,
     override_component_attrs,
+    resolve_snakemake_config_by_planning_horizon,
     set_length_based_efficiency,
 )
 from add_electricity import (
@@ -254,7 +255,34 @@ def attach_hydrogen_pipelines(n, costs, config, transmission_efficiency):
     # remove bus pair duplicates regardless of order of bus0 and bus1
     h2_links = candidates[
         ~pd.DataFrame(np.sort(candidates[["bus0", "bus1"]])).duplicated()
-    ]
+    ].copy()
+
+    if "carrier" in n.buses.columns:
+        valid_h2_buses = set(n.buses.index[n.buses.carrier == "H2"].astype(str))
+    else:
+        valid_h2_buses = set(n.buses.index.astype(str))
+
+    h2_bus0 = h2_links.bus0.astype(str) + " H2"
+    h2_bus1 = h2_links.bus1.astype(str) + " H2"
+    valid_h2_link = h2_bus0.isin(valid_h2_buses) & h2_bus1.isin(valid_h2_buses)
+    if not valid_h2_link.all():
+        dropped = h2_links.loc[~valid_h2_link, ["bus0", "bus1"]]
+        examples = dropped.head(8).apply(
+            lambda c: f"{c.bus0} -> {c.bus1}",
+            axis=1,
+        )
+        logger.warning(
+            "Dropping %s H2 pipeline candidates with missing H2 endpoint buses. "
+            "Examples: %s",
+            len(dropped),
+            "; ".join(examples),
+        )
+        h2_links = h2_links.loc[valid_h2_link].copy()
+
+    if h2_links.empty:
+        logger.warning("No valid H2 pipeline candidates remain after filtering.")
+        return
+
     h2_links.index = h2_links.apply(lambda c: f"H2 pipeline {c.bus0}-{c.bus1}", axis=1)
 
     # add pipelines
@@ -283,6 +311,7 @@ if __name__ == "__main__":
 
         snakemake = mock_snakemake("add_extra_components", simpl="", clusters=10)
 
+    resolve_snakemake_config_by_planning_horizon(snakemake)
     configure_logging(snakemake)
 
     overrides = override_component_attrs(snakemake.input.overrides)
