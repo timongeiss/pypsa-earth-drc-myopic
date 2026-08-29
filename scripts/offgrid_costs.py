@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Timon Geiss, Anton Achhammer, Alexander Meisinger, Leon Schumm, Michael Sterner
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Shared techno-economic assumptions for the H2G offgrid modules."""
 
 from __future__ import annotations

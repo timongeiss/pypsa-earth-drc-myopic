@@ -3,9 +3,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 version = 1
-SPDX-PackageName = "pypsa-earth"
-SPDX-PackageSupplier = "The PyPSA-Earth and PyPSA-Eur Authors <pypsameetsearth@gmail.com>"
-SPDX-PackageDownloadLocation = "https://github.com/pypsa-meets-earth/pypsa-earth"
+SPDX-PackageName = "pypsa-earth-drc-myopic"
+SPDX-PackageSupplier = "Timon Geiss, Anton Achhammer, Alexander Meisinger, Leon Schumm, Michael Sterner"
+SPDX-PackageDownloadLocation = "https://github.com/timongeiss/pypsa-earth-drc-myopic"
 
 [[annotations]]
 path = "doc/data.csv"
@@ -35,6 +35,17 @@ SPDX-License-Identifier = "CC-BY-4.0"
 path = "data/agg_p_nom_minmax.csv"
 precedence = "aggregate"
 SPDX-FileCopyrightText = "The PyPSA-Earth and PyPSA-Eur Authors"
+SPDX-License-Identifier = "CC-BY-4.0"
+
+[[annotations]]
+path = [
+  "data/custom/drc_myopic/**",
+  "data/custom/export_ports.csv",
+  "data/custom/pipelines.csv",
+  "data/custom_powerplants.csv",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Timon Geiss, Anton Achhammer, Alexander Meisinger, Leon Schumm, Michael Sterner"
 SPDX-License-Identifier = "CC-BY-4.0"
 
 [[annotations]]

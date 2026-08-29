@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Timon Geiss, Anton Achhammer, Alexander Meisinger, Leon Schumm, Michael Sterner
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 This script generates quick-look figures for the DRC myopic H2G run.
 It reads solved myopic postnetworks after the standalone off-grid optimisation

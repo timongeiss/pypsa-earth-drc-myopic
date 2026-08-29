@@ -10,6 +10,7 @@ type: software
 version: 0.1.0
 date-released: 2026-08-27
 license: AGPL-3.0-or-later
+repository-code: "https://github.com/timongeiss/pypsa-earth-drc-myopic"
 authors:
   - given-names: Timon
     family-names: Geiss
@@ -40,6 +41,9 @@ references:
   - type: article
     title: "PyPSA-Earth: A new global open energy system optimization model demonstrated in Africa"
     doi: 10.1016/j.apenergy.2023.121096
+    journal: Applied Energy
+    volume: 341
+    pages: "121096"
     authors:
       - given-names: Maximilian
         family-names: Parzen
@@ -69,7 +73,23 @@ references:
   - type: article
     title: "PyPSA-Earth sector-coupled: A global open-source multi-energy system model showcased for hydrogen applications in countries of the Global South"
     doi: 10.1016/j.apenergy.2025.125316
+    journal: Applied Energy
+    volume: 383
+    pages: "125316"
     authors:
       - given-names: Hazem
         family-names: Abdel-Khalek
+      - given-names: Leon
+        family-names: Schumm
+      - given-names: Eddy
+        family-names: Jalbout
+      - given-names: Maximilian
+        family-names: Parzen
+      - given-names: Caspar
+        family-names: Schauß
+      - given-names: Davide
+        family-names: Fioriti
     year: 2025
+  - type: software
+    title: "PyPSA-Earth"
+    url: "https://github.com/pypsa-meets-earth/pypsa-earth"
