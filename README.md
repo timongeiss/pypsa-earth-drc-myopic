@@ -7,8 +7,10 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # DRC Myopic PyPSA-Earth Energy System Model
 
-This repository contains a PyPSA-Earth based model setup for the Democratic
-Republic of the Congo (DRC). It accompanies the paper:
+This repository contains a model setup for the Democratic Republic of the Congo
+(DRC) derived from the official
+[PyPSA-Earth project](https://github.com/pypsa-meets-earth/pypsa-earth). It
+accompanies the paper:
 
 > Timon Geiss, Anton Achhammer, Alexander Meisinger, Leon Schumm and Michael
 > Sterner, "A Constrained PyPSA-Earth-Based Energy System Model for the
@@ -57,8 +59,6 @@ export demand while retaining the same sequential pathway structure.
   Custom power plant and hydro candidate assumptions used by the model.
 - `hybrid_results_myopic.py`
   Plotting and result-inspection script for solved DRC myopic networks.
-- `A_Constrained_PyPSA_Earth_Based_Energy_System_Model_for_the_Democratic_Republic_of_the_Congo.pdf`
-  Local manuscript PDF used for the repository citation metadata.
 
 Generated workflow outputs are written below `resources/`, `networks/`,
 `results/`, `logs/` and `benchmarks/`. These folders are not intended to be
@@ -94,25 +94,36 @@ conda activate pypsa-earth
 Run a dry run first:
 
 ```bash
-snakemake solve_sector_networks --cores 4 --configfile configs/scenarios_H2G/config.H2G_A_CD_myopic.yaml --dry-run
+snakemake solve_sector_networks_myopic --cores 4 --configfile configs/scenarios_H2G/config.H2G_A_CD_myopic.yaml --dry-run
 ```
 
 Start the full model run:
 
 ```bash
-snakemake solve_sector_networks --cores 4 --configfile configs/scenarios_H2G/config.H2G_A_CD_myopic.yaml
+snakemake solve_sector_networks_myopic --cores 4 --configfile configs/scenarios_H2G/config.H2G_A_CD_myopic.yaml
 ```
 
 Snakemake will resume from completed outputs if the workflow stops after a
 successful subset of jobs.
+
+## Data and Results Availability
+
+This Git repository is intended to contain code, configuration files and small
+custom model inputs. Solved networks, intermediate resources, logs, benchmarks
+and generated figures are intentionally excluded from version control.
+
+Publication result artefacts, including solved NetCDF networks, comparison
+tables and generated figures, should be archived separately, for example in a
+Zenodo record, and linked here once a DOI is available.
 
 ## Citation
 
 If you use this repository, cite the accompanying paper and this repository.
 Repository-level citation metadata are provided in `CITATION.cff`.
 
-The model is derived from PyPSA-Earth. Please also cite the relevant PyPSA-Earth
-publications:
+The model is derived from
+[PyPSA-Earth](https://github.com/pypsa-meets-earth/pypsa-earth). Please also
+cite the relevant PyPSA-Earth publications:
 
 - Maximilian Parzen et al., "PyPSA-Earth: A new global open energy system
   optimization model demonstrated in Africa", Applied Energy, 341, 2023,
