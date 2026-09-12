@@ -98,7 +98,7 @@ MODEL_SPECS = (
     {
         "key": "myopic_2025_0",
         "year": 2025,
-        "label": "2025",
+        "label": "REF25",
         "scenario_name": "H2G_A_CD_myopic",
         "network_path": (
             "results/H2G_A_CD_myopic/offgrid/postnetworks/"
@@ -108,7 +108,7 @@ MODEL_SPECS = (
     {
         "key": "myopic_2035_0",
         "year": 2035,
-        "label": "2035",
+        "label": "DOM35",
         "scenario_name": "H2G_A_CD_myopic",
         "network_path": (
             "results/H2G_A_CD_myopic/offgrid/postnetworks/"
@@ -118,7 +118,7 @@ MODEL_SPECS = (
     {
         "key": "myopic_2035_early_large",
         "year": 2035,
-        "label": "2035 early large",
+        "label": "EL35",
         "scenario_name": "H2G_A_CD_myopic",
         "network_path": (
             "results/H2G_A_CD_myopic/offgrid/postnetworks/"
@@ -128,7 +128,7 @@ MODEL_SPECS = (
     {
         "key": "myopic_2050_no_large_hydro",
         "year": 2050,
-        "label": "2050 no large",
+        "label": "NLH50",
         "scenario_name": "H2G_A_CD_myopic",
         "network_path": (
             "results/H2G_A_CD_myopic/offgrid/postnetworks/"
@@ -138,7 +138,7 @@ MODEL_SPECS = (
     {
         "key": "myopic_2050_0",
         "year": 2050,
-        "label": "2050 zero",
+        "label": "DOM50",
         "scenario_name": "H2G_A_CD_myopic",
         "network_path": (
             "results/H2G_A_CD_myopic/offgrid/postnetworks/"
@@ -148,7 +148,7 @@ MODEL_SPECS = (
     {
         "key": "myopic_2050_23p33",
         "year": 2050,
-        "label": "2050 low",
+        "label": "H2-L",
         "scenario_name": "H2G_A_CD_myopic",
         "network_path": (
             "results/H2G_A_CD_myopic/offgrid/postnetworks/"
@@ -158,7 +158,7 @@ MODEL_SPECS = (
     {
         "key": "myopic_2050_78p33",
         "year": 2050,
-        "label": "2050 mid",
+        "label": "H2-M",
         "scenario_name": "H2G_A_CD_myopic",
         "network_path": (
             "results/H2G_A_CD_myopic/offgrid/postnetworks/"
@@ -168,7 +168,7 @@ MODEL_SPECS = (
     {
         "key": "myopic_2050_133p32",
         "year": 2050,
-        "label": "2050 high",
+        "label": "H2-H",
         "scenario_name": "H2G_A_CD_myopic",
         "network_path": (
             "results/H2G_A_CD_myopic/offgrid/postnetworks/"
