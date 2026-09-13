@@ -6,115 +6,100 @@ SPDX-License-Identifier: CC-BY-4.0
 
 # Data Provenance
 
-This document separates authorship of the study-specific compilation and
-transformations from rights in the underlying source material. A CC-BY-4.0
-annotation for a study-authored input applies only where indicated; it does not
-replace third-party attribution or licence requirements.
+This document describes the provenance, study-specific transformations and
+redistribution treatment of the custom model inputs included in this repository.
 
-The comparison against upstream refers to PyPSA-Earth commit
+The DRC-specific datasets were compiled and adapted for the accompanying study.
+Where third-party information is incorporated, the corresponding source rights
+and attribution requirements remain unaffected by the study-specific
+compilation or transformation.
+
+The repository is based on PyPSA-Earth commit
 `9ff3ee2f7fb69e911d82b5abd7395d7b29f0a357`.
 
-| File / dataset | Purpose | Compiled by | Main underlying sources | Transformation | Redistribution/licence notes |
-| --- | --- | --- | --- | --- | --- |
-| `data/custom_powerplants.csv` | Existing plants, hydro candidates and modelled 2025 oil generators | Timon Geiss | Literature and public project-level sources documented in the accompanying manuscript and Supplementary Material; exact record-level mapping **to be confirmed** | Study-specific validation, selection, additions, classifications and modelling annotations in the PyPSA-Earth custom-powerplant schema. Obsolete fixed 2035 oil carryover rows were removed after the workflow audit below. | PyPSA-Earth attribution is preserved for the upstream file/schema. CC-BY-4.0 covers the study-specific compilation and transformations only; source material remains subject to its own terms. |
-| `data/custom/export_ports.csv` | Six hydrogen-export nodes with explicit model-bus assignments | Timon Geiss | The year-specific study bus tables; the underlying source of those bus coordinates is covered by the base-network entries below | Selected six study buses and copied their exact coordinates into the port table | In the current implementation, the `bus` column controls the export connection; `x` and `y` are not used when that column is present. No separate GeoNames data were introduced. Preserve PyPSA-Earth attribution for the upstream file/schema. |
-| `data/custom/pipelines.csv` | Explicitly empty custom gas-network input | Timon Geiss | No substantive source records | Created a header-only control input with the columns expected by the workflow | CC-BY-4.0 covers the study-specific empty input; there are no pipeline observations to attribute. |
-| `data/custom/drc_myopic/base_network/*/custom_all_buses_build_network.csv` | Year-specific network buses and coordinates | Timon Geiss | SNEL planning information compiled by Maupin (2017), study assumptions, and a small coordinate subset matching the retained PyPSA-Earth OpenStreetMap substation extract | Manual reconstruction, selection and planning-horizon assignment. AC voltages are standardized to 220 kV and DC voltages to 500 kV; these values were not copied from the matched OSM substations. At CSV precision, the coordinates of Gbadolite, Kindu, Kisangani and Mbandaka match OSM substation centroids; Mbandaka is numerically identical before rounding. | Only those four coordinate pairs are OSM-derived; the remaining modelling choices and transformations are study-specific. The complete CSV files are nevertheless treated conservatively under ODbL-1.0 with OpenStreetMap contributors and Timon Geiss attribution, consistently with the line CSV treatment. Exact non-OSM source records for the remaining coordinates are **to be confirmed**. |
-| `data/custom/drc_myopic/base_network/*/custom_all_converters_build_network.csv` and `custom_all_transformers_build_network.csv` | Converter connections and empty transformer tables | Timon Geiss | Study network topology and modelling assumptions; exact supporting source records **to be confirmed** | Created converter links between the study AC/DC buses; retained header-only transformer tables | CC-BY-4.0 covers the study-specific tables. |
-| `data/custom/drc_myopic/base_network/*/custom_all_lines_build_network.csv` | Existing and planned AC/DC transmission topology for 2025, 2035 and 2050 | Timon Geiss | SNEL planning information compiled by Maupin (2017), OpenStreetMap line records, and study assumptions | Twelve recurring numeric line rows can be matched to the retained PyPSA-Earth OSM extract. Their OSM fields include the line identifier and source values for `circuits`, `voltage` and `dc`. The study changes `1064077743` from 70 kV to 220 kV; changes circuit counts for `194187707` (1 to 3), `384190117` (2 to 4), and five HVDC records (1/3 to 2/3); splits OSM way `224147292` into two model segments; assigns study bus endpoints; and adds manually reconstructed/planned lines. | Conservatively treated as an OSM-derived database under ODbL-1.0, with “OpenStreetMap contributors” attribution. The study selection and additions are identified separately as Timon Geiss's work. |
-| `data/custom/drc_myopic/demand_regions_2025.csv`, `demand_regions_2035.csv`, `demand_regions_2050.csv` | Map model buses to study demand regions | Timon Geiss | World Bank methodology used as the study basis; exact publication/dataset **to be confirmed** | Manual study-specific regional assignment for each planning horizon | CC-BY-4.0 covers the study-specific assignment; confirm the exact World Bank citation and any required attribution. |
-| `scripts/scale_solar_profile.py` → local `data/custom/drc_myopic/renewable_profiles/solar_custom_2025.nc` | Creates the required 2025 solar-capacity input locally | Timon Geiss (scaling script); PyPSA-Earth workflow for the source profile | Standard PyPSA-Earth `build_renewable_profiles`; an ERA5 2013 cutout through atlite; Copernicus PROBA-V land cover; Natura 2000 exclusion raster; and study bus-region shapes | Loads the standard `profile_solar.nc`, multiplies only `p_nom_max` by one uniform factor so that its total changes from approximately 1,036,877.229624 MW to exactly 250 MW, and writes the custom file. `profile`, `weight`, `potential`, coordinates, buses and all other variables remain unchanged. | The transformation script is distributed under AGPL-3.0-or-later. The generated NetCDF is required locally but is ignored and not redistributed, avoiding a repository-level licence assertion for its unchanged third-party-derived contents. |
-| `data/agg_p_nom_minmax.csv` | Header-only input required by the configured `CCL` option | Timon Geiss (modification); PyPSA-Earth authors (upstream template) | PyPSA-Earth upstream template | Added the planning-horizon columns. Three wind maxima were removed after verifying that wind is non-extendable in every published horizon and that the CCL constraint filters to extendable carriers only. | PyPSA-Earth and Timon Geiss attribution; CC-BY-4.0. No numerical capacity limit remains in this file. |
+| File / dataset | Purpose | Provenance and study-specific transformation | Redistribution / licence treatment |
+| --- | --- | --- | --- |
+| `data/custom_powerplants.csv` | Existing generation assets, future hydropower candidates and modelled 2025 oil generators | Compiled by Timon Geiss from literature and public project-level sources documented in the accompanying manuscript and Supplementary Material. Existing hydropower plants were validated primarily against OpenInfraMap and Wikipedia, with project-specific additions and corrections. Cascaded future hydropower potentials are based primarily on Global Energy Interconnection Development and Cooperation Organization (2020), while individually reported projects use the corresponding project-level sources documented in the study. Identified oil-fired plants are based on OpenInfraMap. Additional 1 MW backup generators at otherwise unrepresented AC buses are a study-specific modelling assumption motivated by the widespread use of private backup generation reported by World Bank (2020). Technology classifications, scenario availability, bus assignment and other modelling annotations are study-specific. A separate record-level source mapping for every CSV row was not retained; source provenance is documented at dataset and project level in the manuscript and Supplementary Material. | The PyPSA-Earth attribution for the upstream file/schema is preserved. CC-BY-4.0 applies to the study-specific compilation and transformations; underlying third-party source material remains subject to its respective terms. |
+| `data/custom/export_ports.csv` | Six hydrogen-export nodes with explicit model-bus assignments | Compiled by Timon Geiss from the year-specific study bus tables. The six export locations are selected study nodes and their coordinates are copied from the corresponding model buses. In the implemented workflow, the explicit `bus` field determines the model connection; coordinate-based assignment is used only as a fallback. | The PyPSA-Earth attribution for the upstream file/schema is preserved. The study-specific compilation is distributed under CC-BY-4.0. Coordinate provenance follows that of the corresponding bus tables. |
+| `data/custom/pipelines.csv` | Empty custom gas-network input | Study-specific header-only input created by Timon Geiss to prevent the workflow from introducing external pipeline records when no custom gas network is specified. | CC-BY-4.0. The file contains no substantive third-party observations. |
+| `data/custom/drc_myopic/base_network/*/custom_all_buses_build_network.csv` | Year-specific model buses and node coordinates | Manually reconstructed by Timon Geiss as part of the study-specific DRC network representation, based primarily on SNEL planning information compiled by Maupin (2017), supplemented by study assumptions and selected OpenStreetMap-derived coordinates. At the precision used in the CSV files, the coordinates of Gbadolite, Kindu, Kisangani and Mbandaka match the corresponding OpenStreetMap substation locations. The remaining node coordinates form part of the study-specific spatial representation; a separate point-source mapping for each non-OSM coordinate was not retained. AC buses are assigned 220 kV and DC buses 500 kV as modelling assumptions; these voltage levels were not copied from the matched OSM substations. | Because the published tables combine study-authored content with OpenStreetMap-derived coordinate information, the complete bus CSV files are conservatively distributed under ODbL-1.0 with attribution to OpenStreetMap contributors and Timon Geiss. The model-node coordinates should not be interpreted as an authoritative geospatial inventory of physical substations. |
+| `data/custom/drc_myopic/base_network/*/custom_all_lines_build_network.csv` | Existing and planned AC/DC transmission topology for 2025, 2035 and 2050 | Reconstructed by Timon Geiss from SNEL planning information compiled by Maupin (2017), OpenStreetMap line records and study assumptions. A subset of existing lines can be traced to OpenStreetMap way identifiers and associated source values for fields including `circuits`, `voltage` and `dc`. The study modifies selected voltage and circuit assumptions, assigns study-specific bus endpoints, splits selected source geometries into model segments, and adds manually reconstructed or planned corridors. | Conservatively distributed under ODbL-1.0 with attribution to OpenStreetMap contributors and Timon Geiss because OSM-derived and study-authored records form a combined network table. |
+| `data/custom/drc_myopic/base_network/*/custom_all_converters_build_network.csv` and `custom_all_transformers_build_network.csv` | Converter connections and transformer-table inputs | Study-authored model-topology inputs created by Timon Geiss from the reconstructed DRC network. Converter records connect the study-specific AC and DC nodes required by the model. Transformer tables are intentionally header-only because no separate transformer representation is used in the published setup. | CC-BY-4.0. |
+| `data/custom/drc_myopic/demand_regions_2025.csv`, `demand_regions_2035.csv`, `demand_regions_2050.csv` | Assignment of model buses to demand-allocation regions | Compiled by Timon Geiss. The regional structure follows World Bank (2020), *Increasing Access to Electricity in the Democratic Republic of Congo: Opportunities and Challenges*, which distinguishes the South-West, East and North-Center regions and provides the regional electricity-access structure used in the study. Assignment of individual model buses to these regions and the 75% / 15% / 10% allocation of national demand across the three regions are study-specific modelling choices. | CC-BY-4.0 applies to the study-specific bus-to-region mapping and modelling representation. |
+| `scripts/scale_solar_profile.py` → local `data/custom/drc_myopic/renewable_profiles/solar_custom_2025.nc` | Creation of the REF25 solar-capacity input | The scaling script was written by Timon Geiss. It uses the standard 2025 solar renewable profile produced by the PyPSA-Earth `build_renewable_profiles` workflow. The source profile is based on a 2013 ERA5 cutout processed through atlite together with the land-availability and spatial inputs used by PyPSA-Earth, including Copernicus PROBA-V land cover, Natura exclusions and model bus regions. The script changes only `p_nom_max`, applying one uniform scaling factor so that the total installable PV capacity is reduced from approximately 1,036,877 MW to exactly 250 MW. The hourly profile, potential, weights, coordinates and other variables are preserved. | `scripts/scale_solar_profile.py` is distributed under AGPL-3.0-or-later. The generated NetCDF file is not redistributed and is ignored by Git. Users generate it locally from the standard PyPSA-Earth renewable-profile workflow, avoiding a separate repository-level licence assertion for the unchanged third-party-derived profile contents. |
+| `data/agg_p_nom_minmax.csv` | Input required by the configured `CCL` option | Based on the PyPSA-Earth upstream template and adapted by Timon Geiss for the study configuration. Planning-horizon columns were added. DRC-specific wind-capacity limits were removed after verification that wind is non-extendable in all published scenarios and therefore does not enter the corresponding CCL constraints. | PyPSA-Earth/PyPSA-Eur and Timon Geiss attribution; CC-BY-4.0. |
 
-## OpenStreetMap field audit
+## OpenStreetMap-derived network information
 
-The OSM-derived subset of each line table consists of these recurring source
-identifiers:
+The custom transmission-network tables combine manually reconstructed study
+data with selected information originating from OpenStreetMap.
+
+For the line tables, the OSM-derived subset includes the following recurring
+source identifiers:
 
 `1028776989`, `1064077743`, `194187707`, `286737300`,
 `384190117`, `865689670`, `224147292`, `460419487`,
 `626214770`, `778351007` and `979570584`.
 
-The remaining `figure_*` and `planned_*` line identifiers are
-study-authored reconstruction/planning records. Assigning ODbL-1.0 to the whole
-line CSV is the conservative publication treatment because OSM-derived and
-study-authored records form one combined network table. [OpenStreetMap's
-copyright page](https://www.openstreetmap.org/copyright) requests the
-attribution “© OpenStreetMap contributors” and identifies its database as
-available under ODbL.
+The remaining `figure_*` and `planned_*` line identifiers represent
+study-specific reconstruction or planning records.
 
-## Bus coordinate and voltage audit
+For the bus tables, the coordinates of Gbadolite, Kindu, Kisangani and Mbandaka
+match the corresponding OpenStreetMap substation coordinates at the precision
+used in the published CSV files. The voltage levels assigned to these buses are
+study assumptions rather than OSM-derived values.
 
-The bus tables were compared with the locally retained PyPSA-Earth OSM clean
-substation extract. Only Mbandaka has an exactly identical unrounded coordinate
-pair. Gbadolite, Kindu and Kisangani match the corresponding OSM centroids when
-rounded to the four decimal places used in the study CSVs. Other bus locations
-do not match an OSM substation at that precision.
+Because the OSM-derived and study-specific information is combined within the
+published bus and line tables, these files are conservatively distributed under
+the Open Database License (ODbL-1.0) with attribution to © OpenStreetMap
+contributors. The study-specific reconstruction and transformations are
+additionally attributed to Timon Geiss.
 
-None of these four matched OSM substations supplies the voltage used in the bus
-tables: their OSM voltages are 132 kV or 70 kV, whereas the study tables use
-220 kV for every AC bus and 500 kV for DC buses. The voltage fields are
-study modelling assumptions rather than direct OSM copies.
+See:
+https://www.openstreetmap.org/copyright
 
-## Solar profile audit
+## Solar-profile generation
 
-The retained source profile was:
+The repository does not redistribute the modified 2025 solar-profile NetCDF.
 
-`/home/get39559/pypsa-earth/resources/H2G_A_CD_2025/renewable_profiles/profile_solar.nc`
+Instead, `scripts/scale_solar_profile.py` reproduces the required study input
+from the standard PyPSA-Earth solar renewable profile. Only `p_nom_max` is
+scaled, using one uniform factor to obtain a total installable PV capacity of
+250 MW. All remaining profile variables are retained from the standard
+PyPSA-Earth output.
 
-That local path documents the audit trail but is not a required public-repo
-path. Its SHA-256 is
-`975d91d599ed3e8ffa3a9558e169e2c4feb04fd485f9dd25f2ad42bd2065212b`.
-The formerly retained custom reference file's SHA-256 was
-`af4c71763a2e8f2cfc4b339323638f04e22edbc16efe5e7cf53df857c5fee81b`.
+The underlying PyPSA-Earth renewable-profile workflow uses ERA5 through atlite
+together with spatial land-availability inputs. The relevant third-party
+datasets retain their original licences and attribution requirements. The
+generated NetCDF therefore remains a local workflow product rather than a
+redistributed research-data file.
 
-The source rule uses ERA5/atlite for the hourly solar profile and uses
-Copernicus land cover, Natura exclusions and bus-region geometry to calculate
-land availability and `p_nom_max`. The [Climate Data Store ERA5
-entry](https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels)
-currently identifies ERA5 under a CC-BY licence. GEBCO is a generic rule input but is not
-used by the configured solar technology because no solar depth restriction is
-set. No claim is made here that the study transformation supersedes licences
-attached to these inputs. The binary snapshot is no longer redistributed;
-`scripts/scale_solar_profile.py` now records and performs the transformation.
+ERA5 information:
+https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels
 
-## Oil carryover audit
+## Inputs not redistributed
 
-Twenty rows formerly present in `data/custom_powerplants.csv` were labelled
-`generated_2025_oil_carryover_2035`. They had been produced by the older local script
-`/home/get39559/pypsa-earth/scripts/update_2035_oil_from_2025.py`
-from a solved 2025 network and total approximately 195.691 MW.
+The following intermediate or rebuild artefacts are intentionally excluded from
+the publication repository:
 
-The rows entered the 2035 electricity-only network as fixed generators, but
-`prepare_sector_network.py` removes electricity-only oil generators and rebuilds
-oil conversion links. The subsequent brownfield step replaces these with the
-links carried from the solved 2025 network. Consequently, none of the C128–C147
-carryover generators is present in either audited 2035 solved network.
+- `data/custom/drc_myopic/osm/custom_substations_2025.geojson`
+- `data/custom/drc_myopic/osm/custom_substations_2035.geojson`
+- `data/custom/drc_myopic/renewable_profiles/solar_custom_2025.nc`
 
-The final 2035 zero-export result produces 230.894 GWh of electricity from its
-2025-carried oil links (approximately 0.58% of AC electricity demand); the
-`early_large` result produces 60.507 GWh (approximately 0.15%). That dispatch
-comes from the normal myopic 2025 brownfield transfer, not from the obsolete
-195.691 MW input rows. The obsolete rows were therefore removed from the
-publication input.
+The custom-substation GeoJSON files are not required by the published workflow,
+which directly uses the year-specific base-network CSV files.
 
-## Inputs intentionally not redistributed
+The custom solar NetCDF is generated locally through the documented Snakemake
+target and is explicitly ignored by Git.
 
-The two former `custom_substations_2025.geojson` and
-`custom_substations_2035.geojson` files were removed from the publication
-working tree. The configured workflow reads the year-specific base-network
-CSVs directly, so those GeoJSON rebuild artefacts were not required to
-reproduce the published path. Removing them also avoids redistributing the
-least-resolved OSM/Bing provenance. They remain recoverable from Git history.
+## Reproducibility note
 
-The generated `solar_custom_2025.nc` is likewise not redistributed. It is
-created locally by the documented Snakemake target and is explicitly ignored
-by Git.
+The custom input files contained in this repository represent the processed
+model inputs used for the study rather than authoritative infrastructure or
+geospatial datasets. Their scientific basis, modelling assumptions and major
+source datasets are documented here and in the accompanying manuscript and
+Supplementary Material.
 
-## Evidence retained in the audited files
-
-- The DRC input set entered repository history in commit
-  `6482bd4f2adae14b96d8823594e9c21a845c6bb1`; no earlier
-  source-preparation history is present for the new files.
-- The export buses are selected explicitly in `scripts/add_export.py` when a
-  `bus` column exists; coordinate-based GADM lookup is only the fallback.
+Large baseline datasets required by the standard PyPSA-Earth workflow are not
+redistributed in this repository and must be obtained through the corresponding
+PyPSA-Earth data-retrieval workflow or from their original providers.
