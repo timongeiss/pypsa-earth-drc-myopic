@@ -1,4 +1,5 @@
 # SPDX-FileCopyrightText:  PyPSA-Earth and PyPSA-Eur Authors
+# SPDX-FileCopyrightText:  2026 Timon Geiss
 #
 # SPDX-License-Identifier: CC0-1.0
 
@@ -169,16 +170,9 @@ clean_osm_data_options: # osm = OpenStreetMap
   path_custom_substations: false # If exists, provide the specific absolute path of the custom file e.g. (...\data\custom_substations.geojson)
   use_custom_cables: "OSM_only" # Use OSM (OSM_only), customized (custom_only), both data sets (add_custom) or none (none)
   path_custom_cables: false # If exists, provide the specific absolute path of the custom file e.g. (...\data\custom_cables.geojson)
-  by_planning_horizon:
-    2025:
-      use_custom_substations: "custom_only"
-      path_custom_substations: "data/custom/drc_myopic/osm/custom_substations_2025.geojson"
-    2035:
-      use_custom_substations: "custom_only"
-      path_custom_substations: "data/custom/drc_myopic/osm/custom_substations_2035.geojson"
-    2050:
-      use_custom_substations: "OSM_only"
-      path_custom_substations: false
+  # No horizon-specific substation GeoJSON is required: the published DRC
+  # workflow reads the year-specific base-network CSVs directly.
+  by_planning_horizon: {}
 
 build_osm_network: # Options of the build_osm_network script; osm = OpenStreetMap
   group_close_buses: true # When "True", close buses are merged and guarantee the voltage matching among line endings

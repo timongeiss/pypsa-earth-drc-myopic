@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText:  PyPSA-Earth and PyPSA-Eur Authors
-# SPDX-FileCopyrightText:  2026 Timon Geiss, Anton Achhammer, Alexander Meisinger, Leon Schumm, Michael Sterner
+# SPDX-FileCopyrightText:  2026 Timon Geiss
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 cff-version: 1.2.0
@@ -7,8 +7,6 @@ message: "If you use this repository, please cite the accompanying paper and the
 title: "DRC Myopic PyPSA-Earth Energy System Model"
 abstract: "A PyPSA-Earth based constrained energy system model for the Democratic Republic of the Congo, configured for sequential myopic planning horizons and hydrogen export from hydropower under real-world network and resource conditions."
 type: software
-version: 0.1.0
-date-released: 2026-08-27
 license: AGPL-3.0-or-later
 repository-code: "https://github.com/timongeiss/pypsa-earth-drc-myopic"
 authors:
@@ -36,7 +34,6 @@ preferred-citation:
       family-names: Schumm
     - given-names: Michael
       family-names: Sterner
-  year: 2026
 references:
   - type: article
     title: "PyPSA-Earth: A new global open energy system optimization model demonstrated in Africa"

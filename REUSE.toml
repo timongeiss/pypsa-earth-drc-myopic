@@ -1,4 +1,5 @@
 # SPDX-FileCopyrightText:  PyPSA-Earth and PyPSA-Eur Authors
+# SPDX-FileCopyrightText:  2026 Timon Geiss
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
@@ -33,19 +34,59 @@ SPDX-License-Identifier = "CC-BY-4.0"
 
 [[annotations]]
 path = "data/agg_p_nom_minmax.csv"
-precedence = "aggregate"
-SPDX-FileCopyrightText = "The PyPSA-Earth and PyPSA-Eur Authors"
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "The PyPSA-Earth and PyPSA-Eur Authors",
+  "2026 Timon Geiss",
+]
 SPDX-License-Identifier = "CC-BY-4.0"
 
 [[annotations]]
 path = [
-  "data/custom/drc_myopic/**",
-  "data/custom/export_ports.csv",
+  "data/custom/drc_myopic/demand_regions_*.csv",
   "data/custom/pipelines.csv",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Timon Geiss"
+SPDX-License-Identifier = "CC-BY-4.0"
+
+[[annotations]]
+path = "data/custom/drc_myopic/base_network/*/custom_all_buses_build_network.csv"
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "OpenStreetMap contributors",
+  "2026 Timon Geiss",
+]
+SPDX-License-Identifier = "ODbL-1.0"
+
+[[annotations]]
+path = [
+  "data/custom/drc_myopic/base_network/*/custom_all_converters_build_network.csv",
+  "data/custom/drc_myopic/base_network/*/custom_all_transformers_build_network.csv",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Timon Geiss"
+SPDX-License-Identifier = "CC-BY-4.0"
+
+[[annotations]]
+path = "data/custom/drc_myopic/base_network/*/custom_all_lines_build_network.csv"
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "OpenStreetMap contributors",
+  "2026 Timon Geiss",
+]
+SPDX-License-Identifier = "ODbL-1.0"
+
+[[annotations]]
+path = [
+  "data/custom/export_ports.csv",
   "data/custom_powerplants.csv",
 ]
 precedence = "override"
-SPDX-FileCopyrightText = "2026 Timon Geiss, Anton Achhammer, Alexander Meisinger, Leon Schumm, Michael Sterner"
+SPDX-FileCopyrightText = [
+  "The PyPSA-Earth and PyPSA-Eur Authors",
+  "2026 Timon Geiss",
+]
 SPDX-License-Identifier = "CC-BY-4.0"
 
 [[annotations]]

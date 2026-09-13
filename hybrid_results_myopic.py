@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-FileCopyrightText: 2026 Timon Geiss, Anton Achhammer, Alexander Meisinger, Leon Schumm, Michael Sterner
+# SPDX-FileCopyrightText: 2026 Timon Geiss
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """

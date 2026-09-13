@@ -1,4 +1,5 @@
 # SPDX-FileCopyrightText:  PyPSA-Earth and PyPSA-Eur Authors
+# SPDX-FileCopyrightText:  2026 Timon Geiss
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
@@ -737,6 +738,21 @@ rule build_renewable_profiles:
         mem_mb=ATLITE_NPROCESSES * 5000,
     script:
         "scripts/build_renewable_profiles.py"
+
+
+rule build_drc_solar_profile_2025:
+    """Create the local 250 MW DRC profile from the standard 2025 solar profile."""
+    input:
+        source=(
+            ELEC_RDIR.replace("{planning_horizons}", "2025")
+            + "renewable_profiles/profile_solar.nc"
+        ),
+    output:
+        profile="data/custom/drc_myopic/renewable_profiles/solar_custom_2025.nc",
+    params:
+        target_mw=250.0,
+    script:
+        "scripts/scale_solar_profile.py"
 
 
 rule build_powerplants:

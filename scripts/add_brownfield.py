@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 # SPDX-FileCopyrightText:  PyPSA-Earth and PyPSA-Eur Authors
+# SPDX-FileCopyrightText:  2026 Timon Geiss
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """

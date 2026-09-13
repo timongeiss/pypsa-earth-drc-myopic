@@ -1,16 +1,14 @@
 <!--
 SPDX-FileCopyrightText:  PyPSA-Earth and PyPSA-Eur Authors
-SPDX-FileCopyrightText:  2026 Timon Geiss, Anton Achhammer, Alexander Meisinger, Leon Schumm, Michael Sterner
+SPDX-FileCopyrightText:  2026 Timon Geiss
 
 SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 
 # DRC Myopic PyPSA-Earth Energy System Model
 
-This repository contains a model setup for the Democratic Republic of the Congo
-(DRC) derived from the official
-[PyPSA-Earth project](https://github.com/pypsa-meets-earth/pypsa-earth). It
-accompanies the paper:
+This repository contains the reproducible implementation of a model setup for
+the Democratic Republic of the Congo (DRC) accompanying the paper:
 
 > Timon Geiss, Anton Achhammer, Alexander Meisinger, Leon Schumm and Michael
 > Sterner, "A Constrained PyPSA-Earth-Based Energy System Model for the
@@ -18,9 +16,14 @@ accompanies the paper:
 > Hydropower under Real-World Conditions".
 
 The model studies a constrained, sequential pathway for the DRC power and
-hydrogen export system. It builds on PyPSA-Earth and adds DRC-specific custom
-network data, hydro assumptions, demand allocation, hydrogen export scenarios
-and myopic brownfield capacity transfer.
+hydrogen export system. It is a modified version of the
+[PyPSA-Earth project](https://github.com/pypsa-meets-earth/pypsa-earth), based
+on PyPSA-Earth commit
+[`9ff3ee2f7fb69e911d82b5abd7395d7b29f0a357`](https://github.com/pypsa-meets-earth/pypsa-earth/commit/9ff3ee2f7fb69e911d82b5abd7395d7b29f0a357).
+This repository is not an official PyPSA-Earth release and is not intended to
+track or merge newer upstream versions. It adds DRC-specific custom network
+data, hydro assumptions, demand allocation, hydrogen export scenarios and
+myopic brownfield capacity transfer.
 
 ## Model Scope
 
@@ -51,20 +54,37 @@ export demand while retaining the same sequential pathway structure.
 - `configs/scenarios_H2G/config.H2G_A_CD_myopic.yaml`
   Main DRC myopic scenario configuration.
 - `data/custom/drc_myopic/`
-  Custom DRC input data for demand regions, year-specific base networks,
-  custom substations and the 2025 custom solar profile.
+  Custom DRC input data for demand regions and year-specific base networks.
+- `scripts/scale_solar_profile.py`
+  Reproducibly creates the local 2025 DRC solar profile by scaling only
+  `p_nom_max` in the standard PyPSA-Earth solar profile to 250 MW.
 - `data/custom/export_ports.csv`
   Custom export-port definition used for hydrogen export cases.
 - `data/custom_powerplants.csv`
   Custom power plant and hydro candidate assumptions used by the model.
+- `data/custom/pipelines.csv`
+  Empty custom-pipeline definition used to avoid substituting an external gas
+  network where no study pipeline is specified.
+- `data/agg_p_nom_minmax.csv`
+  Country/carrier capacity limits used by the `CCL` scenario option.
 - `hybrid_results_myopic.py`
   Plotting and result-inspection script for solved DRC myopic networks.
+- `DATA_PROVENANCE.md`
+  Provenance status and outstanding source/licence checks for custom inputs.
 
 Generated workflow outputs are written below `resources/`, `networks/`,
 `results/`, `logs/` and `benchmarks/`. These folders are not intended to be
 treated as source files.
 
 ## Data Requirements
+
+All small primary study-specific model inputs required by the DRC configuration
+are included in this repository. The derived binary file
+`data/custom/drc_myopic/renewable_profiles/solar_custom_2025.nc` is deliberately
+not redistributed. It is generated locally from the standard PyPSA-Earth solar
+profile by `scripts/scale_solar_profile.py`. Provenance and outstanding
+source/licence checks are documented in
+[`DATA_PROVENANCE.md`](DATA_PROVENANCE.md).
 
 This scenario uses `retrieve_databundle: false` and `build_cutout: false`.
 Therefore, a run expects several PyPSA-Earth baseline datasets to be present
@@ -83,13 +103,34 @@ Large baseline datasets should normally be restored from the PyPSA-Earth data
 bundle, a shared local data directory or an archived publication dataset rather
 than committed to Git.
 
-## Running
+## Installation and Running
+
+Clone the repository and create the Conda environment:
+
+```bash
+git clone https://github.com/timongeiss/pypsa-earth-drc-myopic.git
+cd pypsa-earth-drc-myopic
+conda env create --file envs/environment.yaml
+```
 
 Activate the PyPSA-Earth environment from the repository root:
 
 ```bash
 conda activate pypsa-earth
 ```
+
+Before the model run, create the non-redistributed custom solar NetCDF. This
+rule first builds the standard 2025 PyPSA-Earth `profile_solar.nc` when needed,
+then invokes `scripts/scale_solar_profile.py` and writes
+`data/custom/drc_myopic/renewable_profiles/solar_custom_2025.nc`:
+
+```bash
+snakemake build_drc_solar_profile_2025 --cores 4 --configfile configs/scenarios_H2G/config.H2G_A_CD_myopic.yaml
+```
+
+The generated file is ignored by Git. The full workflow also knows this
+dependency, but running the preparation target explicitly makes the required
+transformation and its successful completion visible before optimization.
 
 Run a dry run first:
 
@@ -104,7 +145,16 @@ snakemake solve_sector_networks_myopic --cores 4 --configfile configs/scenarios_
 ```
 
 Snakemake will resume from completed outputs if the workflow stops after a
-successful subset of jobs.
+successful subset of jobs. The paper configuration selects Gurobi, so a working
+Gurobi installation and licence are required. Platform-specific lock files are
+available under `envs/` for recording the tested dependency resolution.
+
+After the required solved networks are available, regenerate the study figures
+and derived tables with:
+
+```bash
+python hybrid_results_myopic.py
+```
 
 ## Data and Results Availability
 
@@ -115,6 +165,8 @@ and generated figures are intentionally excluded from version control.
 Publication result artefacts, including solved NetCDF networks, comparison
 tables and generated figures, should be archived separately, for example in a
 Zenodo record, and linked here once a DOI is available.
+
+Results dataset: **[Zenodo DOI to be added]**
 
 ## Citation
 
@@ -135,12 +187,24 @@ cite the relevant PyPSA-Earth publications:
 
 ## License
 
-This repository inherits the license structure of the original PyPSA-Earth
-project.
+This repository is derived from PyPSA-Earth and preserves the applicable
+upstream licences and copyright notices.
 
-- Source code and repository metadata: `AGPL-3.0-or-later`
-- Data and documentation where annotated by `REUSE.toml`: `CC-BY-4.0`
-- Public-domain style project metadata where annotated: `CC0-1.0`
+- Source code derived from or extending PyPSA-Earth is distributed under
+  `AGPL-3.0-or-later` where indicated.
+- Study-authored model-input datasets are distributed under `CC-BY-4.0` where
+  indicated.
+- Inputs containing or derived from third-party data retain the applicable
+  source licences and attribution requirements.
+- OpenStreetMap-derived data are attributed to OpenStreetMap contributors and
+  are subject to the Open Database License (`ODbL-1.0`) where applicable.
+- `scripts/build_offgrid_myopic.py` retains Mohamed Amine Chebaane's
+  attribution and its indicated `CC-BY-4.0` licence; the repository copy also
+  contains a small DRC-side change to command-line list handling.
+- File-specific copyright, licensing and data provenance are documented in
+  `REUSE.toml` and `DATA_PROVENANCE.md`.
 
-The license texts are kept in `LICENSES/` and the REUSE annotations are kept in
-`REUSE.toml`.
+Large baseline datasets required by the standard PyPSA-Earth workflow are not
+redistributed in this repository and must be obtained through the corresponding
+PyPSA-Earth data-retrieval workflow or from their original providers. Licence
+texts are kept in `LICENSES/`.
