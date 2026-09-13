@@ -25,6 +25,10 @@ track or merge newer upstream versions. It adds DRC-specific custom network
 data, hydro assumptions, demand allocation, hydrogen export scenarios and
 myopic brownfield capacity transfer.
 
+The reproducible version accompanying the paper is maintained on the
+`paper-drc-myopic` branch, which is the default branch of this repository.
+The archived paper release is identified by the tag `v1.0-paper`.
+
 ## Model Scope
 
 The main scenario is defined in
