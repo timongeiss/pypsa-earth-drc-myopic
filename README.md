@@ -162,15 +162,12 @@ python hybrid_results_myopic.py
 
 ## Data and Results Availability
 
-This Git repository is intended to contain code, configuration files and small
-custom model inputs. Solved networks, intermediate resources, logs, benchmarks
-and generated figures are intentionally excluded from version control.
+This Git repository contains the code, configuration files, and small custom model inputs used in this study. Solved networks, intermediate resources, logs, benchmarks, and generated figures are intentionally excluded from version control.
 
-Publication result artefacts, including solved NetCDF networks, comparison
-tables and generated figures, should be archived separately, for example in a
-Zenodo record, and linked here once a DOI is available.
+The publication result artefacts, including solved NetCDF networks, comparison tables, and generated figures, are archived separately on Zenodo:
 
-Results dataset: **[Zenodo DOI to be added]**
+**Results dataset:** https://doi.org/10.5281/zenodo.22734263
+
 
 ## Citation
 
