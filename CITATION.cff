@@ -10,7 +10,7 @@ type: software
 license: AGPL-3.0-or-later
 repository-code: "https://github.com/timongeiss/pypsa-earth-drc-myopic"
 version: "1.0.0"
-doi: 10.5281/zenodo.22764154
+doi: "10.5281/zenodo.22764154"
 authors:
   - given-names: Timon
     family-names: Geiss
