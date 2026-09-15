@@ -11,9 +11,7 @@ This repository contains the reproducible implementation of a model setup for
 the Democratic Republic of the Congo (DRC) accompanying the paper:
 
 > Timon Geiss, Anton Achhammer, Alexander Meisinger, Leon Schumm and Michael
-> Sterner, "A Constrained PyPSA-Earth-Based Energy System Model for the
-> Democratic Republic of the Congo: Implications for Hydrogen Export from
-> Hydropower under Real-World Conditions".
+> Sterner, "Tailored PyPSA Energy System Models for the Democratic Republic of the Congo: Implications for Hydrogen Export from Hydropower".
 
 The model studies a constrained, sequential pathway for the DRC power and
 hydrogen export system. It is a modified version of the
@@ -28,6 +26,12 @@ myopic brownfield capacity transfer.
 The reproducible version accompanying the paper is maintained on the
 `paper-drc-myopic` branch, which is the default branch of this repository.
 The archived paper release is identified by the tag `v1.0-paper`.
+
+## About the study
+
+European demand for renewable hydrogen imports has increased interest in potential export regions with abundant renewable resources. However, detailed energy-system transition studies for the Democratic Republic of the Congo (DRC) remain scarce. This work develops a country-calibrated, spatially resolved PyPSA-Earth model that represents the existing electricity system, observed supply conditions, project availability, operational constraints, and on- and off-grid electrification. Sequential hourly optimizations for 2025, 2035, and 2050 prioritize domestic electricity demand before assessing renewable hydrogen exports of up to 4.0 Mt/a.
+
+The results indicate that timely infrastructure deployment, rather than resource availability, is a key constraint. Meeting domestic demand in 2035 requires 8.3 GW of additional hydropower, while earlier availability of large Lower Congo projects reduces this requirement to about 4.4 GW and limits intermediate dispersed run-of-river development. Hydrogen exports primarily scale rather than restructure the 2050 system: at 4.0 Mt/a of hydrogen exports, reservoir capacity reaches 39.8 GW while system-level hydrogen costs remain around 2.1 EUR/kg at the domestic export boundary. The results support staged Lower Congo development, where hydropower projects serving domestic electrification can also provide the basis for later hydrogen-export expansion and associated public-private investment.
 
 ## Model Scope
 
